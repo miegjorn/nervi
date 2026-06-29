@@ -1,7 +1,7 @@
 # Nèrvi — Helm values
-# Deploys NATS JetStream and the nervi-server MCP service.
+# Deploys NATS JetStream and the nervi-mcp MCP service.
 
-image: ghcr.io/miegjorn/nervi-server
+image: ghcr.io/miegjorn/nervi-mcp
 imageTag: latest  # CI writes sha-<sha> here on every main push
 
 imagePullSecrets:
