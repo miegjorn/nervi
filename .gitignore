@@ -1,2 +1,15 @@
+# Rust
 /target
+
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Helm — downloaded subchart archives (Chart.lock is committed for reproducibility)
+helm/nervi/charts/
+
+# Env / local
 .env
+.DS_Store
