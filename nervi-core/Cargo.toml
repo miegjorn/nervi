@@ -11,3 +11,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+
+[dev-dependencies]
+# Integration tests (tests/) compile as a separate crate and only see
+# dev-dependencies, so the bus dependencies are repeated here.
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Used by the integration test to reset the stream to a known-empty state so
+# the test is repeatable against a persistent (file-backed) broker.
+async-nats = { workspace = true }

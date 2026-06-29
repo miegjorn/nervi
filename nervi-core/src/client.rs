@@ -31,8 +31,38 @@ impl NerviClient {
         Ok(Self { js })
     }
 
+    /// Ensure the JetStream stream backing `subject` exists, creating it if it
+    /// does not. Idempotent — safe to call on every startup.
+    ///
+    /// In the cluster the stream is provisioned by a Helm post-install hook, so
+    /// callers normally rely on it already existing. For local development and
+    /// the N-4 integration test (which run against an ephemeral broker) this
+    /// lets nervi-core provision the stream itself, using the *same* naming
+    /// convention as [`publish`](Self::publish) / [`subscribe`](Self::subscribe)
+    /// (see [`stream_name_for`]) so the round-trip stays consistent.
+    ///
+    /// The stream covers `<root>.>` (e.g. `ops.>`), is file-backed for
+    /// durability, and returns the resolved stream name.
+    pub async fn ensure_stream(&self, subject: &str) -> Result<String> {
+        let stream_name = stream_name_for(subject);
+        let root = subject.split('.').next().unwrap_or(subject);
+
+        self.js
+            .get_or_create_stream(jetstream::stream::Config {
+                name: stream_name.clone(),
+                subjects: vec![format!("{}.>", root)],
+                storage: jetstream::stream::StorageType::File,
+                ..Default::default()
+            })
+            .await
+            .with_context(|| format!("ensuring stream {} for subject {}", stream_name, subject))?;
+
+        Ok(stream_name)
+    }
+
     /// Publish a message to a subject. The stream covering the subject must
-    /// already exist (created by the `ops` stream ConfigMap on cluster startup).
+    /// already exist — provisioned by the cluster Helm hook, or via
+    /// [`ensure_stream`](Self::ensure_stream) in local / test environments.
     pub async fn publish(&self, opts: PublishOptions) -> Result<()> {
         self.js
             .publish(opts.subject.clone(), opts.payload.into_bytes().into())

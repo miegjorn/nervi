@@ -12,6 +12,35 @@ permissions:
   packages: write
 
 jobs:
+  nervi-core:
+    name: nervi-core (Rust clippy + integration test on real NATS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start NATS JetStream
+        # Service containers can't pass the `-js` flag, so run the broker
+        # directly. This is the SAME real NATS the in-cluster fabric uses —
+        # the N-4 integration test exercises it end to end, no mocks.
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/4222) 2>/dev/null; then
+              echo "NATS JetStream is ready"; exit 0
+            fi
+            echo "waiting for NATS..."; sleep 1
+          done
+          echo "NATS did not become ready"; docker logs nats; exit 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test (unit + N-4 integration against real NATS)
+        run: cargo test --workspace
+        env:
+          NERVI_TEST_NATS_URL: nats://127.0.0.1:4222
+
   mcp:
     name: MCP server (lint, typecheck, test, build)
     runs-on: ubuntu-latest
