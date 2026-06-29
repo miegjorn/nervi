@@ -1,15 +1,20 @@
-# N-4 — Integration test plan: SRE sensor → `ops.sre.alerts` → consumer
+# N-4 — Integration test: SRE sensor → `ops.sre.alerts` → consumer
 
-**Status:** planned (not yet implemented). Closes nervi#6 when realized.
+**Status:** implemented. Test:
+[`mcp/nervi-mcp/test/bus.integration.test.ts`](../mcp/nervi-mcp/test/bus.integration.test.ts).
+Run with `npm run test:integration` (see the repo README). Closes nervi#6.
+
+**Harness chosen:** the *Ephemeral NATS (CI-friendly)* option below. The test drives the
+real `NatsBus` (no bus mock) against a live `nats:2.10-alpine -js` broker addressed by
+`NATS_URL` (default `nats://localhost:4222`); it provisions the `OCCITAN` stream in setup
+and purges it between cases for determinism. CI starts the broker in a dedicated
+`integration` job. The MCP transport (stdio/HTTP) is the only layer not exercised. The
+in-cluster, true-E2E harness remains future work — see Deferred work at the end.
 
 N-4 is the first end-to-end proof that the Signal Bus Core (N-1/N-2/N-3) carries a real
-operational signal from a producer to a consumer through the OCCITAN stream. It depends
-on N-1 being deployed and the `nervi-mcp` server reachable in-cluster.
+operational signal from a producer to a consumer through the OCCITAN stream.
 
-This document is the plan the implementation will follow — it is not a runnable test
-yet. Epic 2 (N-5 watcher, N-6 classification, N-7 Farga write) provides the *real* SRE
-sensor; N-4 may use a stand-in producer so the fabric can be validated before the sensor
-lands.
+The rest of this document is the original plan the implementation followed.
 
 ## Goal
 
@@ -78,3 +83,15 @@ fresh-cursor names) so reruns start clean; optionally `nats stream purge OCCITAN
 
 All assertions pass against a live broker. At that point nervi#6 closes and Epic 1 is
 end-to-end proven, unblocking Epic 2's real SRE sensor.
+
+## Deferred work
+
+The implemented test covers the full signal-bus chain below the MCP transport. Two items
+from this plan are intentionally deferred (logged in Farga, project `nervi`, component
+`n4`):
+
+- **In-cluster true E2E:** the `Job`-in-namespace harness that talks to `nervi-mcp` over
+  Streamable HTTP. The CI-friendly ephemeral broker is sufficient to prove Epic 1; the
+  in-cluster smoke test belongs with deployment verification.
+- **Oversized-payload edge case:** the `OCCITAN` stream sets no `max_msg_size`, so there
+  is nothing to assert yet. Revisit if a size limit is configured.
