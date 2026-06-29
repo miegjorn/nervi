@@ -23,16 +23,16 @@ resources:
 
 # ─── NATS JetStream (sub-chart) ──────────────────────────────────────────────
 nats:
-  jetstream:
-    enabled: true
-    fileStorage:
+  config:
+    jetstream:
       enabled: true
-      size: 10Gi
-      storageDirectory: /data
-  cluster:
-    enabled: false  # single-node; expand later if needed
+      fileStore:
+        enabled: true
+        dir: /data
+        pvc:
+          enabled: true
+          size: 10Gi
+    cluster:
+      enabled: false  # single-node; expand later if needed
   service:
     type: ClusterIP  # intra-cluster only, no external exposure
-  nats:
-    image:
-      tag: "2.10"
