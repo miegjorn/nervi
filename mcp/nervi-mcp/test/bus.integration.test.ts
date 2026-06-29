@@ -106,14 +106,16 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
   // -------------------------------------------------------------------------
   // Reset: purge & republish exactly two known messages so later assertions
   // have a deterministic baseline.
+  // Note: NATS stream purge removes messages but does NOT reset the sequence
+  // counter — we assert relative ordering, not absolute sequence numbers.
   // -------------------------------------------------------------------------
 
   it('baseline: purge stream and publish exactly the two test alerts', async () => {
     await jsm.streams.purge(STREAM_NAME);
     const r1 = await bus.publish('ops.sre.alerts', ALERT_1, 'info');
     const r2 = await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
-    expect(r1.seq).toBe(1);
-    expect(r2.seq).toBe(2);
+    expect(r1.seq).toBeGreaterThanOrEqual(1);
+    expect(r2.seq).toBeGreaterThan(r1.seq);
   });
 
   // -------------------------------------------------------------------------
