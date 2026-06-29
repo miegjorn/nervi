@@ -1,15 +1,39 @@
 # N-4 — Integration test: SRE sensor → `ops.sre.alerts` → consumer
 
-**Status:** implemented. Test:
-[`mcp/nervi-mcp/test/bus.integration.test.ts`](../mcp/nervi-mcp/test/bus.integration.test.ts).
-Run with `npm run test:integration` (see the repo README). Closes nervi#6.
+**Status:** implemented at two layers. Closes nervi#6.
 
-**Harness chosen:** the *Ephemeral NATS (CI-friendly)* option below. The test drives the
-real `NatsBus` (no bus mock) against a live `nats:2.10-alpine -js` broker addressed by
-`NATS_URL` (default `nats://localhost:4222`); it provisions the `OCCITAN` stream in setup
-and purges it between cases for determinism. CI starts the broker in a dedicated
-`integration` job. The MCP transport (stdio/HTTP) is the only layer not exercised. The
-in-cluster, true-E2E harness remains future work — see Deferred work at the end.
+**TypeScript layer (`nervi-mcp`):** test at
+[`mcp/nervi-mcp/test/bus.integration.test.ts`](../mcp/nervi-mcp/test/bus.integration.test.ts).
+Run with `npm run test:integration` (see the repo README). Drives the real `NatsBus` (no
+bus mock) against a live `nats:2.10-alpine -js` broker; provisions the `OCCITAN` stream
+in setup. CI runs this in a dedicated `integration` job.
+
+**Rust layer (`nervi-core`):** test at
+[`nervi-core/tests/integration.rs`](../nervi-core/tests/integration.rs).
+Runs in CI (`.github/workflows/ci.yml`, job `nervi-core`) against a real
+`nats:2.10-alpine -js` broker — no mocks. Exercises the Rust `NerviClient`
+(`publish` / `subscribe`) directly.
+
+**What the Rust test asserts** (a focused subset of the full scenario below,
+matching nervi#6's definition of done):
+
+- **Late, durable subscription:** the consumer is created *after* the producer has
+  published and exited, and still receives the alert from the file-backed stream.
+- **Payload integrity:** the JSON alert round-trips byte-for-byte and decodes back
+  into the same struct.
+- **Subject filtering:** noise published to a different `ops.*` subject
+  (`ops.metrics.cpu`) is not delivered to the `ops.sre.alerts` consumer.
+
+**Deferred to follow-up work** (see Farga TODO `nervi/n4-integration`):
+
+- Durable-cursor ack semantics (plan steps 6–7): the current `nervi_subscribe`
+  uses stateless `DeliverAll` ephemeral consumers, so re-fetch replays rather than
+  advancing a cursor.
+- `Nervi-Qualifier` header round-trip (the Rust client carries no qualifier yet).
+- The true in-cluster E2E harness driving `nervi-mcp` over Streamable HTTP.
+
+The remainder of this document is the original plan, retained as the target the
+full E2E harness (in-cluster, MCP tools, qualifiers) will grow toward.
 
 N-4 is the first end-to-end proof that the Signal Bus Core (N-1/N-2/N-3) carries a real
 operational signal from a producer to a consumer through the OCCITAN stream.
