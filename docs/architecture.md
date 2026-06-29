@@ -74,9 +74,52 @@ server.ts    MCP wiring (stdio locally / Streamable HTTP in-cluster)
 The `SignalBus` seam is what lets N-2/N-3 logic be unit-tested without a broker. Live
 broker behavior is covered by the N-4 integration test (planned).
 
+## The SRE log watcher (N-5)
+
+Epic 2's first sensor. A long-running watcher (`sensors/sre-watcher/`, a k8s Deployment)
+that follows pod logs and feeds the classification stage. It mirrors the MCP server's
+seam-based layering so its policy logic is unit-testable without a cluster:
+
+```
+core.ts      pure domain: PodRef / RawLogLine / LogLine, config parse, log-line parse,
+             and the two seams — no @kubernetes import
+k8s.ts       the only Kubernetes-aware module — K8sPodSource implements PodSource
+watcher.ts   reconcile / stream / resume / reconnect policy over the seams
+sinks.ts     ConsoleSink — the N-6 stand-in
+main.ts      entrypoint: config → live PodSource + ConsoleSink → run, with SIGTERM
+```
+
+### Two seams
+
+- **`PodSource`** (toward Kubernetes): `listTargets()` returns the running pod/container
+  targets matching the watch config; `streamLogs(ref, opts)` follows one pod's logs as an
+  async iterable of `RawLogLine`, completing when the stream ends. `K8sPodSource` reads
+  pods via `CoreV1Api` and logs via `Log` (`follow`, `timestamps`), bridging the log
+  stream through `readline`.
+- **`ClassificationSink`** (toward N-6): `emit(line: LogLine)`. This is the N-6 interface
+  contract. The watcher emits every line and nothing more — N-6 (classification rules)
+  is a sink implementation, and N-7 (the Farga signal write) sits behind it. The watcher
+  needs no change when N-6 lands; it is constructed with whichever sink is wired in.
+
+### Log tracking — reconnection and resumption
+
+- **New / rotated pods.** A reconcile loop re-lists targets every `pollIntervalMs`. Newly
+  seen pods get a streaming task; pods that have left the set (rollout, deletion) have
+  their task aborted. A rollout therefore "resumes cleanly": the old pod's stream stops,
+  the replacement pod is picked up on the next reconcile.
+- **Dropped streams.** When a follow stream ends, the watcher reconnects with exponential
+  backoff (`reconnectBackoffMs` → `maxReconnectBackoffMs`, reset on progress), resuming
+  with `sinceTime` set to the last emitted timestamp. The boundary line redelivered by
+  `sinceTime` is dropped (timestamp ≤ cursor), so no line is emitted twice. This relies
+  on the Kubernetes log timestamps being consistently formatted RFC3339Nano in UTC, so a
+  lexicographic comparison matches chronological order.
+- **First attach.** With no cursor yet, the watcher attaches with `sinceSeconds` lookback
+  rather than replaying the pod's full history.
+
 ## Deferred (recorded, not built here)
 
 - Triager rule engine and qualifier-vocabulary extensibility.
 - Subscriber weighting / reversal recognition (depends on Cor dream-introspection).
 - Endorsement protocol and scope-authority layers.
-- The SRE log sensor itself (Epic 2: N-5 watcher, N-6 classification, N-7 Farga write).
+- N-6 alert classification rules and N-7 Farga signal write — they plug into the N-5
+  watcher's `ClassificationSink` seam.

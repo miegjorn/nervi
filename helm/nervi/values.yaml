@@ -45,6 +45,35 @@ mcp:
       memory: 128Mi
 
 # ---------------------------------------------------------------------------
+# SRE log watcher (N-5) — the first sensor (Epic 2). Streams pod logs and feeds
+# the classification stage (N-6). Read-only RBAC: get/list/watch pods + pods/log.
+# Disabled by default — opt in once a classification consumer (N-6) is in place,
+# since until then it only emits log lines as NDJSON to its own stdout.
+# ---------------------------------------------------------------------------
+watcher:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ghcr.io/miegjorn/sre-watcher
+    tag: latest
+    pullPolicy: Always
+  # Pod selection. All-empty means cluster-wide, every container.
+  namespaces: [] # list of namespaces to watch; empty = all namespaces
+  labelSelector: "" # k8s label selector, e.g. "app=api"
+  container: "" # restrict to a single container name; empty = all containers
+  # Log-tracking tunables (map to WATCH_* env vars).
+  sinceSeconds: 10 # lookback when first attaching to a pod (no resume cursor yet)
+  pollIntervalMs: 15000 # how often to re-list pods to pick up new / rotated pods
+  reconnectBackoffMs: 1000 # base backoff after a log stream ends/errors
+  maxReconnectBackoffMs: 30000 # cap on the reconnect backoff
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
 # NATS subchart. JetStream on file storage, ClusterIP only.
 # ---------------------------------------------------------------------------
 nats:

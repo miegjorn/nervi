@@ -1,0 +1,27 @@
+{
+  "name": "sre-watcher",
+  "version": "0.1.0",
+  "description": "Nèrvi SRE sensor — Kubernetes pod log watcher (N-5) feeding the classification stage",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sre-watcher": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@kubernetes/client-node": "^1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
+  }
+}

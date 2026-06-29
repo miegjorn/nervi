@@ -1,0 +1,92 @@
+{{- if .Values.watcher.enabled }}
+{{/*
+N-5 SRE log watcher — the first sensor (Epic 2). Streams pod logs from the
+cluster and feeds the classification stage (N-6). Read-only: it only ever lists
+pods and reads their logs, granted via the ClusterRole below.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sre-watcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nervi.labels" . | nindent 4 }}
+---
+{{/*
+Read-only access to pods and their logs, cluster-wide so the watcher can follow
+pods in any namespace. The only verbs granted are get/list/watch — never write.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-sre-watcher
+  labels:
+    {{- include "nervi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-sre-watcher
+  labels:
+    {{- include "nervi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-sre-watcher
+subjects:
+  - kind: ServiceAccount
+    name: sre-watcher
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-watcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nervi.labels" . | nindent 4 }}
+    {{- include "nervi.selectorLabels" (dict "component" "sre-watcher" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.watcher.replicas }}
+  selector:
+    matchLabels:
+      {{- include "nervi.selectorLabels" (dict "component" "sre-watcher" "context" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nervi.selectorLabels" (dict "component" "sre-watcher" "context" .) | nindent 8 }}
+    spec:
+      serviceAccountName: sre-watcher
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sre-watcher
+          image: "{{ .Values.watcher.image.repository }}:{{ .Values.watcher.image.tag }}"
+          imagePullPolicy: {{ .Values.watcher.image.pullPolicy }}
+          env:
+            - name: WATCH_NAMESPACES
+              value: {{ join "," .Values.watcher.namespaces | quote }}
+            - name: WATCH_LABEL_SELECTOR
+              value: {{ .Values.watcher.labelSelector | quote }}
+            - name: WATCH_CONTAINER
+              value: {{ .Values.watcher.container | quote }}
+            - name: WATCH_SINCE_SECONDS
+              value: {{ .Values.watcher.sinceSeconds | quote }}
+            - name: WATCH_POLL_INTERVAL_MS
+              value: {{ .Values.watcher.pollIntervalMs | quote }}
+            - name: WATCH_RECONNECT_BACKOFF_MS
+              value: {{ .Values.watcher.reconnectBackoffMs | quote }}
+            - name: WATCH_MAX_RECONNECT_BACKOFF_MS
+              value: {{ .Values.watcher.maxReconnectBackoffMs | quote }}
+          resources:
+            {{- toYaml .Values.watcher.resources | nindent 12 }}
+{{- end }}
