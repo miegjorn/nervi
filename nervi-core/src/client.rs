@@ -124,7 +124,7 @@ impl NerviClient {
 
 /// Derive the JetStream stream name from a subject.
 /// Convention: the first token of the subject is the stream name.
-/// `ops.sre.alerts` → `ops`, `infra.alerts` → `infra`.
+/// `occitan.ops.sre.alerts` → `OCCITAN`, `infra.alerts` → `INFRA`.
 fn stream_name_for(subject: &str) -> String {
     subject.split('.').next().unwrap_or(subject).to_uppercase()
 }
@@ -135,7 +135,8 @@ mod tests {
 
     #[test]
     fn stream_name_from_subject() {
-        assert_eq!(stream_name_for("ops.sre.alerts"), "OPS");
+        assert_eq!(stream_name_for("occitan.ops.sre.alerts"), "OCCITAN");
+        assert_eq!(stream_name_for("occitan.ops.metrics.cpu"), "OCCITAN");
         assert_eq!(stream_name_for("infra.metrics"), "INFRA");
         assert_eq!(stream_name_for("plain"), "PLAIN");
     }
