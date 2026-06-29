@@ -50,6 +50,27 @@ describe('assertSubject', () => {
   });
 });
 
+describe('ADR-N-001 namespace contract', () => {
+  // These assertions deliberately hardcode the occitan.* contract instead of
+  // deriving it from core.ts. bus.integration.test.ts imports STREAM_SUBJECTS,
+  // so if STREAM_SUBJECTS and assertSubject drift together to a wrong namespace
+  // (as happened between PR #15 and PR #16), the integration test stays green
+  // while production breaks. This block is the independent witness that pins
+  // the contract to literals; it goes red the moment core.ts strays.
+  it('STREAM_SUBJECTS matches occitan namespace', () => {
+    expect(STREAM_SUBJECTS).toEqual(['occitan.>']);
+  });
+  it('assertSubject accepts occitan.* subjects', () => {
+    expect(() => assertSubject('occitan.ops.sre.alerts')).not.toThrow();
+    expect(() => assertSubject('occitan.foo.bar')).not.toThrow();
+  });
+  it('assertSubject rejects non-occitan subjects', () => {
+    expect(() => assertSubject('ops.sre.alerts')).toThrow();
+    expect(() => assertSubject('ops.>')).toThrow();
+    expect(() => assertSubject('sre.alerts')).toThrow();
+  });
+});
+
 describe('normalizePayload', () => {
   it('passes strings through unchanged', () => {
     expect(normalizePayload('hello')).toBe('hello');
