@@ -1,0 +1,38 @@
+# Nèrvi — Helm values
+# Deploys NATS JetStream and the nervi-server MCP service.
+
+image: ghcr.io/miegjorn/nervi-server
+imageTag: latest  # CI writes sha-<sha> here on every main push
+
+imagePullSecrets:
+  - name: ghcr-creds
+
+replicas: 1
+port: 8080
+
+env:
+  NATS_URL: "nats://nervi-nats.occitan-system.svc.cluster.local:4222"
+  PORT: "8080"
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# ─── NATS JetStream (sub-chart) ──────────────────────────────────────────────
+nats:
+  jetstream:
+    enabled: true
+    fileStorage:
+      enabled: true
+      size: 10Gi
+      storageDirectory: /data
+  cluster:
+    enabled: false  # single-node; expand later if needed
+  service:
+    type: ClusterIP  # intra-cluster only, no external exposure
+  nats:
+    image:
+      tag: "2.10"

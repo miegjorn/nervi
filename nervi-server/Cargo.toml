@@ -1,0 +1,18 @@
+[package]
+name = "nervi-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nervi-server"
+path = "src/main.rs"
+
+[dependencies]
+nervi-core = { path = "../nervi-core" }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

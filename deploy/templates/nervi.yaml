@@ -1,0 +1,72 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nervi
+  namespace: occitan-system
+  labels:
+    app.kubernetes.io/name: nervi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nervi
+  namespace: occitan-system
+  labels:
+    app.kubernetes.io/name: nervi
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nervi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nervi
+    spec:
+      serviceAccountName: nervi
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nervi
+          image: "{{ .Values.image }}:{{ .Values.imageTag }}"
+          imagePullPolicy: Always
+          ports:
+            - containerPort: {{ .Values.port }}
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nervi
+  namespace: occitan-system
+  labels:
+    app.kubernetes.io/name: nervi
+spec:
+  selector:
+    app.kubernetes.io/name: nervi
+  ports:
+    - port: {{ .Values.port }}
+      targetPort: {{ .Values.port }}
+      name: mcp
+  type: ClusterIP
