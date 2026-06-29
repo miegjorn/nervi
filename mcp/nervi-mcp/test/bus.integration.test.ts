@@ -1,5 +1,5 @@
 /**
- * N-4 integration test — SRE sensor → ops.sre.alerts → consumer.
+ * N-4 integration test — SRE sensor → occitan.ops.sre.alerts → consumer.
  *
  * Runs against a real NATS server with JetStream enabled. The NATS URL is
  * read from the NATS_URL env var (default: nats://localhost:4222).
@@ -12,7 +12,7 @@
  *   - ack semantics (acked messages not redelivered to same durable consumer)
  *   - independent cursor (fresh consumer name replays from stream beginning)
  *   - subject filtering (messages on different ops.* subjects not delivered)
- *   - subject validation (non-ops.* subject rejected before touching the bus)
+ *   - subject validation (non-occitan.* subject rejected before touching the bus)
  *
  * CI spins up `nats:2.10-alpine -js` as a service; locally you can run:
  *   docker run --rm -p 4222:4222 nats:2.10-alpine -js
@@ -57,7 +57,7 @@ async function deleteConsumer(jsm: JetStreamManager, name: string): Promise<void
 // Test suite
 // ---------------------------------------------------------------------------
 
-describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
+describe('N-4 integration: SRE sensor → occitan.ops.sre.alerts → consumer', () => {
   let nc: NatsConnection;
   let jsm: JetStreamManager;
   let bus: NatsBus;
@@ -91,15 +91,15 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
   // -------------------------------------------------------------------------
 
   it('publishes first alert (info) with payload and qualifier', async () => {
-    const result = await bus.publish('ops.sre.alerts', ALERT_1, 'info');
+    const result = await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
     expect(result.stream).toBe(STREAM_NAME);
     expect(typeof result.seq).toBe('number');
     expect(result.seq).toBeGreaterThanOrEqual(1);
   });
 
   it('publishes second alert (cross-project) and seq increments', async () => {
-    const first = await bus.publish('ops.sre.alerts', ALERT_1, 'info');
-    const second = await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
+    const first = await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+    const second = await bus.publish('occitan.ops.sre.alerts', ALERT_2, 'cross-project');
     expect(second.seq).toBeGreaterThan(first.seq);
   });
 
@@ -112,8 +112,8 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
 
   it('baseline: purge stream and publish exactly the two test alerts', async () => {
     await jsm.streams.purge(STREAM_NAME);
-    const r1 = await bus.publish('ops.sre.alerts', ALERT_1, 'info');
-    const r2 = await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
+    const r1 = await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+    const r2 = await bus.publish('occitan.ops.sre.alerts', ALERT_2, 'cross-project');
     expect(r1.seq).toBeGreaterThanOrEqual(1);
     expect(r2.seq).toBeGreaterThan(r1.seq);
   });
@@ -124,17 +124,17 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
 
   it('consumer created after publication receives both alerts (durability)', async () => {
     // The consumer does not exist yet — NatsBus.fetch() creates it lazily.
-    const messages = await bus.fetch('ops.sre.alerts', CONSUMER_A, 10);
+    const messages = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 10);
     expect(messages).toHaveLength(2);
   });
 
   it('payload round-trips byte-for-byte', async () => {
     // Purge and republish, then use a fresh consumer name to replay.
     await jsm.streams.purge(STREAM_NAME);
-    await bus.publish('ops.sre.alerts', ALERT_1, 'info');
-    await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_2, 'cross-project');
 
-    const messages = await bus.fetch('ops.sre.alerts', CONSUMER_B, 10);
+    const messages = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_B, 10);
     expect(messages[0].payload).toBe(ALERT_1);
     expect(messages[1].payload).toBe(ALERT_2);
   });
@@ -144,10 +144,10 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
     // Repopulate and use a new cursor.
     await jsm.streams.purge(STREAM_NAME);
     await deleteConsumer(jsm, CONSUMER_B);
-    await bus.publish('ops.sre.alerts', ALERT_1, 'info');
-    await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_2, 'cross-project');
 
-    const messages = await bus.fetch('ops.sre.alerts', CONSUMER_B, 10);
+    const messages = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_B, 10);
     expect(messages[0].qualifier).toBe('info');
     expect(messages[1].qualifier).toBe('cross-project');
   });
@@ -155,19 +155,19 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
   it('sequence numbers are ascending', async () => {
     await jsm.streams.purge(STREAM_NAME);
     await deleteConsumer(jsm, CONSUMER_A);
-    await bus.publish('ops.sre.alerts', ALERT_1, 'info');
-    await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_2, 'cross-project');
 
-    const messages = await bus.fetch('ops.sre.alerts', CONSUMER_A, 10);
+    const messages = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 10);
     expect(messages[0].sequence).toBeLessThan(messages[1].sequence);
   });
 
   it('timestamp is present and ISO-8601', async () => {
     await jsm.streams.purge(STREAM_NAME);
     await deleteConsumer(jsm, CONSUMER_A);
-    await bus.publish('ops.sre.alerts', ALERT_1, 'info');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
 
-    const [msg] = await bus.fetch('ops.sre.alerts', CONSUMER_A, 1);
+    const [msg] = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 1);
     expect(msg.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     expect(() => new Date(msg.timestamp)).not.toThrow();
     expect(new Date(msg.timestamp).getTime()).not.toBeNaN();
@@ -182,15 +182,15 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
     // Ensure stream has messages but CONSUMER_A's cursor is past them.
     await jsm.streams.purge(STREAM_NAME);
     await deleteConsumer(jsm, CONSUMER_A);
-    await bus.publish('ops.sre.alerts', ALERT_1, 'info');
-    await bus.publish('ops.sre.alerts', ALERT_2, 'cross-project');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_2, 'cross-project');
 
     // First fetch — consumes and acks both.
-    const first = await bus.fetch('ops.sre.alerts', CONSUMER_A, 10);
+    const first = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 10);
     expect(first).toHaveLength(2);
 
     // Second fetch — cursor advanced, nothing pending.
-    const second = await bus.fetch('ops.sre.alerts', CONSUMER_A, 10);
+    const second = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 10);
     expect(second).toHaveLength(0);
   });
 
@@ -206,7 +206,7 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
     await deleteConsumer(jsm, CURSOR_NEW);
 
     try {
-      const messages = await bus.fetch('ops.sre.alerts', CURSOR_NEW, 10);
+      const messages = await bus.fetch('occitan.ops.sre.alerts', CURSOR_NEW, 10);
       expect(messages).toHaveLength(2);
     } finally {
       await deleteConsumer(jsm, CURSOR_NEW);
@@ -218,15 +218,15 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
   // ops.sre.alerts consumer.
   // -------------------------------------------------------------------------
 
-  it('messages on a different ops.* subject are not delivered to the ops.sre.alerts consumer', async () => {
+  it('messages on a different occitan.* subject are not delivered to the occitan.ops.sre.alerts consumer', async () => {
     await jsm.streams.purge(STREAM_NAME);
     await deleteConsumer(jsm, CONSUMER_A);
 
-    // Publish to a different subject (still in OCCITAN stream via ops.>).
-    await bus.publish('ops.infra.metrics', '{"cpu":0.75}', 'data');
+    // Publish to a different subject (still in OCCITAN stream via occitan.>).
+    await bus.publish('occitan.ops.infra.metrics', '{"cpu":0.75}', 'data');
 
     // Consumer filtered to ops.sre.alerts should receive 0 messages.
-    const messages = await bus.fetch('ops.sre.alerts', CONSUMER_A, 10);
+    const messages = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 10);
     expect(messages).toHaveLength(0);
   });
 
@@ -234,7 +234,7 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
   // Negative / edge: non-ops.* subject rejected before touching the bus.
   // -------------------------------------------------------------------------
 
-  it('rejects a non-ops.* subject at the validation layer', async () => {
+  it('rejects a non-occitan.* subject at the validation layer', async () => {
     // assertSubject is called inside handlePublish/handleSubscribe — but we
     // can also verify it at the bus level by checking that ValidationError is
     // thrown when the handlers are involved. Here we test the core guard
@@ -242,6 +242,10 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
     const { handlePublish } = await import('../src/handlers.js');
     await expect(
       handlePublish(bus, { subject: 'dev.sre.alerts', payload: ALERT_1, qualifier: 'info' }),
+    ).rejects.toThrow(ValidationError);
+    // ops.* subjects are also rejected now that the stream captures occitan.> only
+    await expect(
+      handlePublish(bus, { subject: 'ops.sre.alerts', payload: ALERT_1, qualifier: 'info' }),
     ).rejects.toThrow(ValidationError);
   });
 
@@ -252,9 +256,9 @@ describe('N-4 integration: SRE sensor → ops.sre.alerts → consumer', () => {
   it('max_messages larger than pending count returns only what is pending', async () => {
     await jsm.streams.purge(STREAM_NAME);
     await deleteConsumer(jsm, CONSUMER_A);
-    await bus.publish('ops.sre.alerts', ALERT_1, 'info');
+    await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
 
-    const messages = await bus.fetch('ops.sre.alerts', CONSUMER_A, 100);
+    const messages = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_A, 100);
     // Only 1 message was published; we asked for 100.
     expect(messages).toHaveLength(1);
   });

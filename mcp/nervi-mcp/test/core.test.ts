@@ -36,7 +36,7 @@ describe('qualifier vocabulary', () => {
 
 describe('assertSubject', () => {
   it('accepts concrete ops subjects', () => {
-    expect(assertSubject('ops.sre.alerts')).toBe('ops.sre.alerts');
+    expect(assertSubject('occitan.ops.sre.alerts')).toBe('occitan.ops.sre.alerts');
   });
 
   it('rejects empty, whitespace, wildcard, and non-ops subjects', () => {
@@ -45,6 +45,7 @@ describe('assertSubject', () => {
     expect(() => assertSubject('ops.>')).toThrow(ValidationError);
     expect(() => assertSubject('ops.*')).toThrow(ValidationError);
     expect(() => assertSubject('dev.sre.alerts')).toThrow(ValidationError);
+    expect(() => assertSubject('ops.sre.alerts')).toThrow(ValidationError);
     expect(() => assertSubject(42)).toThrow(ValidationError);
   });
 });
@@ -104,8 +105,8 @@ describe('buildHeaders', () => {
 });
 
 describe('stream constants', () => {
-  it('targets the OCCITAN stream over ops.>', () => {
+  it('targets the OCCITAN stream over occitan.>', () => {
     expect(STREAM_NAME).toBe('OCCITAN');
-    expect(STREAM_SUBJECTS).toEqual(['ops.>']);
+    expect(STREAM_SUBJECTS).toEqual(['occitan.>']);
   });
 });
