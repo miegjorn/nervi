@@ -26,8 +26,9 @@ The first proof-of-value: **SRE logs → `ops.sre.alerts` subject → developer 
 ## Layout
 
 ```
-helm/nervi/          Helm chart: NATS JetStream (OCCITAN stream) + nervi-mcp deployment
+helm/nervi/           Helm chart: NATS JetStream (OCCITAN stream) + nervi-mcp + sre-watcher
 mcp/nervi-mcp/        TypeScript MCP server exposing nervi_publish / nervi_subscribe
+sensors/sre-watcher/  TypeScript SRE log watcher (N-5) — streams pod logs to the N-6 stage
 docs/                 Architecture notes + the N-4 integration test plan
 ```
 
@@ -128,9 +129,51 @@ The broker URL is read from `NERVI_TEST_NATS_URL` (default
 `nats://127.0.0.1:4222`). CI starts `nats:2.10-alpine -js` and runs this test on
 every push and pull request (see `.github/workflows/ci.yml`).
 
+## The SRE log watcher (N-5)
+
+`sensors/sre-watcher/` is the first sensor (Epic 2). It connects to the Kubernetes API
+with a **read-only ServiceAccount** (`get`/`list`/`watch` on `pods`, `get` on
+`pods/log`), follows the logs of the pods it targets, and emits every log line to the
+**classification stage (N-6)**. It tracks pods continuously: new and rotated pods are
+picked up on each reconcile, and a dropped log stream reconnects with exponential
+backoff, resuming from the last seen timestamp so no line is lost or duplicated across
+the gap.
+
+The watcher depends only on two seams (see `src/core.ts`):
+
+- **`PodSource`** — the Kubernetes side (`K8sPodSource` in `src/k8s.ts`).
+- **`ClassificationSink`** — the N-6 side. The watcher calls `sink.emit(line)` for every
+  `LogLine` and does nothing else; classification, alerting, and the Farga signal write
+  (N-7) all live behind this interface. Until N-6 ships, `ConsoleSink` stands in, emitting
+  each line as NDJSON on stdout — the same line-delimited stream N-6 will consume.
+
+Configuration (env vars, surfaced as `watcher.*` Helm values):
+
+| Env var | Helm value | Default | Meaning |
+|---------|-----------|---------|---------|
+| `WATCH_NAMESPACES` | `watcher.namespaces` (list) | _all_ | Comma-separated namespaces; empty = cluster-wide |
+| `WATCH_LABEL_SELECTOR` | `watcher.labelSelector` | _none_ | k8s label selector narrowing pods |
+| `WATCH_CONTAINER` | `watcher.container` | _all_ | Restrict to a single container name |
+| `WATCH_SINCE_SECONDS` | `watcher.sinceSeconds` | `10` | Lookback when first attaching to a pod |
+| `WATCH_POLL_INTERVAL_MS` | `watcher.pollIntervalMs` | `15000` | How often to re-list pods |
+| `WATCH_RECONNECT_BACKOFF_MS` | `watcher.reconnectBackoffMs` | `1000` | Base reconnect backoff |
+| `WATCH_MAX_RECONNECT_BACKOFF_MS` | `watcher.maxReconnectBackoffMs` | `30000` | Backoff cap |
+
+The watcher ships **disabled by default** (`watcher.enabled=false`): until a
+classification consumer (N-6) is in place it only emits to its own stdout. Enable it with
+`--set watcher.enabled=true`.
+
+```sh
+cd sensors/sre-watcher
+npm install
+npm test         # unit tests (fake PodSource + sink — no cluster needed)
+npm run build
+```
+
 ## Status
 
-Founding implementation of Epic 1 (N-1/N-2/N-3) plus the N-4 end-to-end integration test
-that proves the signal bus carries a real SRE alert producer → consumer. Epic 2 (the SRE
-log sensor, N-5…N-7) builds on this. See Farga (project `nervi`) for the running
-development narrative.
+Founding implementation of Epic 1 (N-1/N-2/N-3) plus N-4 end-to-end integration tests
+(TypeScript and Rust layers) and the first Epic 2 sensor (N-5, the SRE log watcher).
+N-6 (classification rules) and N-7 (Farga signal on alert) plug into the watcher's
+`ClassificationSink` seam. See Farga (project `nervi`) for the running development
+narrative.
