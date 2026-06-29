@@ -17,8 +17,8 @@ export const TIMESTAMP_HEADER = 'Nervi-Timestamp';
 
 /** The single durable JetStream stream backing all operational topics. */
 export const STREAM_NAME = 'OCCITAN';
-/** Subjects captured by the OCCITAN stream (covers ops.sre.alerts, etc.). */
-export const STREAM_SUBJECTS = ['ops.>'];
+/** Subjects captured by the OCCITAN stream (covers occitan.ops.sre.alerts, etc.). */
+export const STREAM_SUBJECTS = ['occitan.>'];
 
 /** Raised when tool input fails validation. Carries no NATS state. */
 export class ValidationError extends Error {
@@ -43,7 +43,7 @@ export function assertQualifier(value: unknown): Qualifier {
 
 /**
  * A subject must be non-empty, whitespace-free, and live under a configured
- * stream subject prefix. We only accept `ops.*` because that is what the
+ * stream subject prefix. We only accept `occitan.*` because that is what the
  * OCCITAN stream captures — publishing elsewhere would silently drop.
  */
 export function assertSubject(value: unknown): string {
@@ -56,7 +56,7 @@ export function assertSubject(value: unknown): string {
   if (value.includes('>') || value.includes('*')) {
     throw new ValidationError('subject must be a concrete subject, not a wildcard');
   }
-  if (!value.startsWith('ops.')) {
+  if (!value.startsWith('occitan.')) {
     throw new ValidationError(
       `subject must live under an OCCITAN stream prefix (${STREAM_SUBJECTS.join(', ')}), got ${value}`,
     );

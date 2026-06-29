@@ -27,22 +27,22 @@ describe('handlePublish', () => {
   it('publishes a string payload with the qualifier carried through', async () => {
     const bus = new FakeBus();
     const result = await handlePublish(bus, {
-      subject: 'ops.sre.alerts',
+      subject: 'occitan.ops.sre.alerts',
       payload: 'disk full on node-3',
       qualifier: 'info',
     });
 
     expect(bus.published).toEqual([
-      { subject: 'ops.sre.alerts', payload: 'disk full on node-3', qualifier: 'info' },
+      { subject: 'occitan.ops.sre.alerts', payload: 'disk full on node-3', qualifier: 'info' },
     ]);
     const body = parse(result);
-    expect(body).toMatchObject({ published: true, subject: 'ops.sre.alerts', qualifier: 'info', stream: 'OCCITAN', seq: 1 });
+    expect(body).toMatchObject({ published: true, subject: 'occitan.ops.sre.alerts', qualifier: 'info', stream: 'OCCITAN', seq: 1 });
   });
 
   it('JSON-encodes object payloads before handing them to the bus', async () => {
     const bus = new FakeBus();
     await handlePublish(bus, {
-      subject: 'ops.sre.alerts',
+      subject: 'occitan.ops.sre.alerts',
       payload: { level: 'critical', node: 'node-3' },
       qualifier: 'data',
     });
@@ -51,7 +51,7 @@ describe('handlePublish', () => {
 
   it('rejects bad input before touching the bus', async () => {
     const bus = new FakeBus();
-    await expect(handlePublish(bus, { subject: 'ops.x', payload: 'p', qualifier: 'nope' })).rejects.toThrow(
+    await expect(handlePublish(bus, { subject: 'occitan.ops.x', payload: 'p', qualifier: 'nope' })).rejects.toThrow(
       ValidationError,
     );
     await expect(handlePublish(bus, { subject: 'bad.subject', payload: 'p', qualifier: 'info' })).rejects.toThrow(
@@ -67,7 +67,7 @@ describe('handleSubscribe', () => {
     bus.fetchResult = [
       {
         sequence: 7,
-        subject: 'ops.sre.alerts',
+        subject: 'occitan.ops.sre.alerts',
         qualifier: 'info',
         payload: 'disk full',
         timestamp: '2026-06-29T12:00:00.000Z',
@@ -75,13 +75,13 @@ describe('handleSubscribe', () => {
     ];
 
     const result = await handleSubscribe(bus, {
-      subject: 'ops.sre.alerts',
+      subject: 'occitan.ops.sre.alerts',
       consumer_name: 'developer-consumer',
       max_messages: 5,
     });
 
     expect(bus.fetched).toEqual([
-      { subject: 'ops.sre.alerts', consumerName: 'developer-consumer', maxMessages: 5 },
+      { subject: 'occitan.ops.sre.alerts', consumerName: 'developer-consumer', maxMessages: 5 },
     ]);
     const body = parse(result);
     expect(body.count).toBe(1);
@@ -90,14 +90,14 @@ describe('handleSubscribe', () => {
 
   it('defaults max_messages to 10', async () => {
     const bus = new FakeBus();
-    await handleSubscribe(bus, { subject: 'ops.sre.alerts', consumer_name: 'dev' });
+    await handleSubscribe(bus, { subject: 'occitan.ops.sre.alerts', consumer_name: 'dev' });
     expect(bus.fetched[0].maxMessages).toBe(10);
   });
 
   it('rejects bad consumer names before touching the bus', async () => {
     const bus = new FakeBus();
     await expect(
-      handleSubscribe(bus, { subject: 'ops.sre.alerts', consumer_name: 'bad.name' }),
+      handleSubscribe(bus, { subject: 'occitan.ops.sre.alerts', consumer_name: 'bad.name' }),
     ).rejects.toThrow(ValidationError);
     expect(bus.fetched).toHaveLength(0);
   });
