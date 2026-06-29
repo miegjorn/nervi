@@ -1,0 +1,87 @@
+# Nèrvi Helm values.
+#
+# Install into namespace `nervi` with release name `nervi` so the NATS service
+# DNS (nervi-nats.nervi.svc.cluster.local) matches the MCP default:
+#   helm install nervi ./helm/nervi -n nervi --create-namespace
+
+imagePullSecrets:
+  - name: ghcr-creds
+
+# ---------------------------------------------------------------------------
+# OCCITAN JetStream stream — provisioned idempotently by a post-install hook.
+# ---------------------------------------------------------------------------
+stream:
+  name: OCCITAN
+  subjects:
+    - "ops.>"
+  storage: file
+  retention: limits
+  discard: old
+  replicas: 1
+  maxBytes: 1073741824 # 1 GiB
+  maxAgeSeconds: 604800 # 7 days
+  duplicateWindowSeconds: 120 # 2 minutes
+  # nats-box image used to run the natscli provisioning job.
+  provisionImage: natsio/nats-box:0.18.0
+
+# ---------------------------------------------------------------------------
+# Nèrvi MCP server (nervi_publish / nervi_subscribe) — ClusterIP only.
+# ---------------------------------------------------------------------------
+mcp:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ghcr.io/miegjorn/nervi-mcp
+    tag: latest
+    pullPolicy: Always
+  port: 8080
+  # Leave empty to derive nats://nervi-nats.<release-namespace>.svc.cluster.local:4222
+  natsUrl: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# NATS subchart. JetStream on file storage, ClusterIP only.
+# ---------------------------------------------------------------------------
+nats:
+  # Pin the service name so the MCP default URL resolves regardless of release name.
+  fullnameOverride: nervi-nats
+  config:
+    cluster:
+      enabled: false
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 1Gi
+      memoryStore:
+        enabled: false
+  # ClusterIP (default). Only the core 4222 client port is needed intra-cluster.
+  service:
+    enabled: true
+    ports:
+      nats:
+        enabled: true
+      leafnodes:
+        enabled: false
+      websocket:
+        enabled: false
+      mqtt:
+        enabled: false
+      cluster:
+        enabled: false
+      gateway:
+        enabled: false
+      monitor:
+        enabled: false
+      profiling:
+        enabled: false
+  # nats-box ships disabled — we run our own provisioning job instead.
+  natsBox:
+    enabled: false

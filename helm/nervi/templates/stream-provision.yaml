@@ -1,0 +1,93 @@
+{{/*
+Idempotent provisioning of the durable OCCITAN JetStream stream.
+
+The NATS subchart enables JetStream and provisions the file store, but stream
+definitions are not part of that chart — so we apply ours with a post-install /
+post-upgrade Helm hook that runs natscli against the freshly deployed server.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nervi-stream-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nervi.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  stream.json: |
+    {
+      "name": "{{ .Values.stream.name }}",
+      "subjects": [{{ range $i, $s := .Values.stream.subjects }}{{ if $i }}, {{ end }}{{ $s | quote }}{{ end }}],
+      "retention": "{{ .Values.stream.retention }}",
+      "storage": "{{ .Values.stream.storage }}",
+      "discard": "{{ .Values.stream.discard }}",
+      "num_replicas": {{ .Values.stream.replicas }},
+      "max_consumers": -1,
+      "max_msgs": -1,
+      "max_msgs_per_subject": -1,
+      "max_msg_size": -1,
+      "max_bytes": {{ int64 .Values.stream.maxBytes }},
+      "max_age": {{ mul .Values.stream.maxAgeSeconds 1000000000 }},
+      "duplicate_window": {{ mul .Values.stream.duplicateWindowSeconds 1000000000 }},
+      "sealed": false,
+      "deny_delete": false,
+      "deny_purge": false,
+      "allow_rollup_hdrs": false
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nervi-stream-provision
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nervi.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "nervi.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: provision
+          image: {{ .Values.stream.provisionImage | quote }}
+          env:
+            - name: NATS_URL
+              value: {{ include "nervi.natsUrl" . | quote }}
+          volumeMounts:
+            - name: stream-config
+              mountPath: /etc/nervi
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for NATS at $NATS_URL ..."
+              until nats rtt >/dev/null 2>&1; do
+                echo "  ...not ready yet"; sleep 3;
+              done
+              echo "NATS reachable. Reconciling stream {{ .Values.stream.name }}."
+              if nats stream info {{ .Values.stream.name }} >/dev/null 2>&1; then
+                nats stream update {{ .Values.stream.name }} --config /etc/nervi/stream.json -f
+                echo "Stream updated."
+              else
+                nats stream add {{ .Values.stream.name }} --config /etc/nervi/stream.json
+                echo "Stream created."
+              fi
+      volumes:
+        - name: stream-config
+          configMap:
+            name: nervi-stream-config

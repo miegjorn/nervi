@@ -1,51 +1,86 @@
 # Nèrvi
 
-Nèrvi is the async subscription fabric for the Occitan stack. It deploys NATS
-JetStream on the cluster and exposes `nervi_publish` and `nervi_subscribe` MCP
-tools so agents can exchange machine-readable signals without synchronous
-coordination or a Matrix room.
+**The async subscription fabric of the Occitan stack — the nervous system.**
 
-In Occitan, *nèrvi* means nerve — sinew, impulse, the thread that carries
-sensation. Nèrvi carries intra-stack signals between components.
+Nèrvi is not a queue alongside [Amassada](https://github.com/miegjorn/Occitan) — it is
+Amassada *inside* the queue. Agents subscribe to topics; sensors publish signals; the
+full agent-to-agent signal flow is captured and routed asynchronously. Where
+Charradissa is the human-readable *voice* of the stack, Nèrvi is its machine-readable
+*nervous system*.
 
-## What it is not
+The substrate is **NATS JetStream** (durable, file-backed, intra-cluster). Signals are
+qualified (`info` | `cross-project` | `data`) and the qualifier maps directly onto
+Farga node types.
 
-Nèrvi is not Charradissa (the human-chat layer) and is not a general
-application message queue. It carries intra-stack agent signals only. The first
-sensor is an SRE log monitor that publishes anomalies to `ops.sre.alerts`.
+## Epic 1 — Signal Bus Core (this repository)
 
-## Architecture
+The first proof-of-value: **SRE logs → `ops.sre.alerts` subject → developer consumer.**
+
+| Story | What |
+|-------|------|
+| N-1 (#3) | Deploy NATS JetStream via Helm on the Occitan k8s cluster |
+| N-2 (#4) | MCP tool `nervi_publish` — publish to a subject |
+| N-3 (#5) | MCP tool `nervi_subscribe` — fetch pending messages from a subject |
+| N-4 (#6) | Integration test: SRE sensor → `ops.sre.alerts` → consumer (planned — see [docs/integration-test-n4.md](docs/integration-test-n4.md)) |
+
+## Layout
 
 ```
-nervi-core/     — NATS JetStream client + shared types
-nervi-server/   — MCP HTTP server (POST /mcp) exposing nervi_publish, nervi_subscribe
-deploy/         — Helm chart: NATS JetStream sub-chart + nervi-server Deployment
+helm/nervi/          Helm chart: NATS JetStream (OCCITAN stream) + nervi-mcp deployment
+mcp/nervi-mcp/        TypeScript MCP server exposing nervi_publish / nervi_subscribe
+docs/                 Architecture notes + the N-4 integration test plan
 ```
 
-## MCP tools
+## The OCCITAN stream
 
-| Tool | Description |
-|---|---|
-| `nervi_publish` | Publish a message to a NATS subject (e.g. `ops.sre.alerts`) |
-| `nervi_subscribe` | Consume pending messages from a NATS subject (ephemeral pull consumer) |
+A single durable JetStream stream backs all operational topics:
 
-MCP endpoint: `http://nervi.occitan-system.svc.cluster.local:8080/mcp`
+| Property | Value |
+|----------|-------|
+| Name | `OCCITAN` |
+| Subjects | `ops.>` (covers `ops.sre.alerts`, etc.) |
+| Storage | file (persistent, 1 GiB max) |
+| Retention | limits, 7-day max age |
+| Replicas | 1 |
+| Exposure | ClusterIP only — never public |
 
-## Streams
+## Deploy
 
-| Stream | Subjects | Retention |
-|---|---|---|
-| `OPS` | `ops.>` | 10 000 msgs / 24 h |
-
-## Development
-
-```bash
-cargo build --all
-cargo test --all
+```sh
+# From the cluster context (namespace and release name must both be "nervi"
+# so the NATS service DNS matches the MCP default).
+helm dependency build helm/nervi
+helm upgrade --install nervi ./helm/nervi -n nervi --create-namespace
 ```
 
-## Deployment
+A post-install hook idempotently reconciles the `OCCITAN` stream against
+`helm/nervi/values.yaml`.
 
-The chart lives in `deploy/` and is deployed via ArgoCD from
-`miegjorn/Caissa/deploy/argocd/apps/nervi.yaml` into the `occitan-system`
-namespace.
+## The MCP server
+
+`mcp/nervi-mcp/` is a small [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol)
+server. It connects to NATS via `NATS_URL`
+(default `nats://nervi-nats.nervi.svc.cluster.local:4222`) and exposes two tools:
+
+- **`nervi_publish`** — publish to an `ops.*` subject. Inputs: `subject`, `payload`
+  (string or JSON), `qualifier` (`info` | `cross-project` | `data`). The qualifier is
+  embedded as the `Nervi-Qualifier` message header.
+- **`nervi_subscribe`** — fetch pending messages via a durable pull consumer (stateless,
+  no long-running subscription). Inputs: `subject`, `consumer_name`, `max_messages`
+  (default 10). Returns `sequence`, `subject`, `qualifier`, `payload`, `timestamp`.
+
+In-cluster the server runs over Streamable HTTP (`NERVI_MCP_TRANSPORT=http`); locally it
+defaults to stdio.
+
+```sh
+cd mcp/nervi-mcp
+npm install
+npm test         # unit tests (mocked bus)
+npm run build
+```
+
+## Status
+
+Founding implementation of Epic 1 (N-1/N-2/N-3). Epic 2 (the SRE log sensor, N-5…N-7)
+and the N-4 integration test build on this. See Farga (project `nervi`) for the running
+development narrative.
