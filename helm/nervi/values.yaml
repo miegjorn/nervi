@@ -13,7 +13,7 @@ imagePullSecrets:
 stream:
   name: OCCITAN
   subjects:
-    - "ops.>"
+    - "occitan.>"
   storage: file
   retention: limits
   discard: old

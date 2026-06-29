@@ -1,11 +1,11 @@
-# Creates the durable "ops" JetStream stream after NATS is ready.
-# Subject ops.> captures all ops signals including ops.sre.alerts.
+# Creates the durable OCCITAN JetStream stream after NATS is ready.
+# Subject occitan.> captures all project signals (occitan.ops.sre.alerts, etc.).
 # Retention: up to 10 000 messages or 24 hours, whichever comes first.
 # Storage: file — survives pod restarts.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nervi-ops-stream-config
+  name: nervi-occitan-stream-config
   namespace: occitan-system
   labels:
     app.kubernetes.io/name: nervi
@@ -15,8 +15,8 @@ data:
   # The Job runs nats stream add via the NATS CLI so the stream is idempotent.
   stream.json: |
     {
-      "name": "OPS",
-      "subjects": ["ops.>"],
+      "name": "OCCITAN",
+      "subjects": ["occitan.>"],
       "storage": "file",
       "retention": "limits",
       "max_msgs": 10000,
@@ -26,12 +26,12 @@ data:
       "discard": "old"
     }
 ---
-# One-shot Job that creates the OPS stream on first deploy (idempotent).
+# One-shot Job that creates the OCCITAN stream on first deploy (idempotent).
 # Runs after NATS is ready; safe to re-run if the stream already exists.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: nervi-create-ops-stream
+  name: nervi-create-occitan-stream
   namespace: occitan-system
   labels:
     app.kubernetes.io/name: nervi
@@ -64,9 +64,9 @@ spec:
                 echo "waiting for NATS..."
                 sleep 2
               done
-              # Create OPS stream (idempotent — succeeds even if already exists)
-              nats --server "$NATS_URL" stream add OPS \
-                --subjects "ops.>" \
+              # Create OCCITAN stream (idempotent — succeeds even if already exists)
+              nats --server "$NATS_URL" stream add OCCITAN \
+                --subjects "occitan.>" \
                 --storage file \
                 --retention limits \
                 --max-msgs 10000 \
@@ -74,5 +74,5 @@ spec:
                 --replicas 1 \
                 --discard old \
                 --defaults 2>/dev/null || \
-              nats --server "$NATS_URL" stream info OPS
-              echo "OPS stream ready"
+              nats --server "$NATS_URL" stream info OCCITAN
+              echo "OCCITAN stream ready"
