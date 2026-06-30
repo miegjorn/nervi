@@ -37,7 +37,7 @@ export function buildServer(bus: SignalBus): McpServer {
         'Publish a message to a NATS JetStream subject on the OCCITAN stream. ' +
         'The qualifier is embedded in the message headers (Nervi-Qualifier).',
       inputSchema: {
-        subject: z.string().describe('Concrete subject under ops.* (e.g. ops.sre.alerts)'),
+        subject: z.string().describe('Concrete subject under occitan.* (e.g. occitan.issues.nervi)'),
         payload: z
           .union([z.string(), z.record(z.string(), z.unknown())])
           .describe('Message body — string or JSON object'),
@@ -57,7 +57,7 @@ export function buildServer(bus: SignalBus): McpServer {
         'Fetch pending messages from a NATS JetStream subject via a durable pull consumer. ' +
         'Stateless — no long-running subscription. Creates the durable consumer on first use.',
       inputSchema: {
-        subject: z.string().describe('Concrete subject under ops.* (e.g. ops.sre.alerts)'),
+        subject: z.string().describe('Concrete subject under occitan.* (e.g. occitan.issues.nervi)'),
         consumer_name: z.string().describe('Durable consumer identity (stable across calls)'),
         max_messages: z
           .number()
