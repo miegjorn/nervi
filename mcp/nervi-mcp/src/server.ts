@@ -44,6 +44,15 @@ export function buildServer(bus: SignalBus): McpServer {
         qualifier: z
           .enum(QUALIFIERS)
           .describe('Signal qualifier — maps to a Farga node type'),
+        msg_id: z
+          .string()
+          .optional()
+          .describe(
+            'Optional NATS deduplication key (Nats-Msg-Id header). ' +
+            'The broker silently drops duplicate publishes with the same id within 1 hour. ' +
+            'Convention (ADR-N-002): dispatch messages use dispatch-<component>-<issue>-<date>, ' +
+            'e.g. dispatch-caissa-43-20260630.',
+          ),
       },
     },
     (args) => toResult(() => handlePublish(bus, args)),

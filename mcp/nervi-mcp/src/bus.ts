@@ -51,10 +51,10 @@ export class NatsBus implements SignalBus {
     await this.nc.drain();
   }
 
-  async publish(subject: string, payload: string, qualifier: Qualifier): Promise<PublishResult> {
+  async publish(subject: string, payload: string, qualifier: Qualifier, msgId?: string): Promise<PublishResult> {
     const timestamp = new Date().toISOString();
     const h = natsHeaders();
-    for (const [key, value] of Object.entries(buildHeaders(qualifier, timestamp))) {
+    for (const [key, value] of Object.entries(buildHeaders(qualifier, timestamp, msgId))) {
       h.set(key, value);
     }
     const ack = await this.js.publish(subject, sc.encode(payload), { headers: h });
