@@ -86,6 +86,7 @@ async fn sre_alert_reaches_developer_consumer_intact_after_late_subscription() {
         .publish(PublishOptions {
             subject: ALERTS_SUBJECT.to_string(),
             payload: serde_json::to_string(&alert).unwrap(),
+            ..Default::default()
         })
         .await
         .expect("publish SRE alert to occitan.ops.sre.alerts");
@@ -95,6 +96,7 @@ async fn sre_alert_reaches_developer_consumer_intact_after_late_subscription() {
         .publish(PublishOptions {
             subject: NOISE_SUBJECT.to_string(),
             payload: r#"{"cpu":0.42}"#.to_string(),
+            ..Default::default()
         })
         .await
         .expect("publish noise to occitan.ops.metrics.cpu");

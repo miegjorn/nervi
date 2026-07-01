@@ -1,5 +1,14 @@
 use anyhow::{Context, Result};
 use async_nats::jetstream::{self, consumer::PullConsumer};
+use async_nats::HeaderMap;
+
+/// Header carrying the qualifier on every Nèrvi message. Matches
+/// `nervi-mcp`'s `QUALIFIER_HEADER` (`mcp/nervi-mcp/src/core.ts`) so messages
+/// published from either implementation are indistinguishable on the wire.
+pub const QUALIFIER_HEADER: &str = "Nervi-Qualifier";
+/// Header carrying the publish-time ISO-8601 timestamp. Matches
+/// `nervi-mcp`'s `TIMESTAMP_HEADER`.
+pub const TIMESTAMP_HEADER: &str = "Nervi-Timestamp";
 
 /// A received message from a JetStream subject.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -9,11 +18,23 @@ pub struct Message {
 }
 
 /// Options for publishing a message.
+#[derive(Default)]
 pub struct PublishOptions {
     /// NATS subject to publish to (e.g. `ops.sre.alerts`).
     pub subject: String,
     /// Message payload as a plain string.
     pub payload: String,
+    /// Qualifier embedded as the `Nervi-Qualifier` header (ADR-N-001:
+    /// `info` | `cross-project` | `data`, or a signal-kind-specific value
+    /// such as ADR-N-005's `cross-project`). `None` omits the header
+    /// entirely — matches the pre-existing behavior for callers that don't
+    /// set one.
+    pub qualifier: Option<String>,
+    /// Publish-time ISO-8601 timestamp, embedded as `Nervi-Timestamp`.
+    /// `None` omits the header. Callers own timestamp generation so this
+    /// crate stays free of a wall-clock dependency and is deterministic
+    /// under test.
+    pub timestamp: Option<String>,
 }
 
 /// Thin wrapper around the async-nats JetStream client.
@@ -63,13 +84,35 @@ impl NerviClient {
     /// Publish a message to a subject. The stream covering the subject must
     /// already exist — provisioned by the cluster Helm hook, or via
     /// [`ensure_stream`](Self::ensure_stream) in local / test environments.
+    ///
+    /// When `opts.qualifier` and/or `opts.timestamp` are `Some`, they are
+    /// embedded as the `Nervi-Qualifier` / `Nervi-Timestamp` headers (same
+    /// header names as `nervi-mcp`); when both are `None`, this publishes
+    /// with no headers, identical to the pre-existing behavior.
     pub async fn publish(&self, opts: PublishOptions) -> Result<()> {
-        self.js
-            .publish(opts.subject.clone(), opts.payload.into_bytes().into())
-            .await
-            .with_context(|| format!("publishing to {}", opts.subject))?
-            .await
-            .context("awaiting publish ack")?;
+        let subject = opts.subject.clone();
+        let payload = bytes::Bytes::from(opts.payload.into_bytes());
+
+        let ack = if opts.qualifier.is_none() && opts.timestamp.is_none() {
+            self.js
+                .publish(subject.clone(), payload)
+                .await
+                .with_context(|| format!("publishing to {}", subject))?
+        } else {
+            let mut headers = HeaderMap::new();
+            if let Some(q) = &opts.qualifier {
+                headers.insert(QUALIFIER_HEADER, q.as_str());
+            }
+            if let Some(ts) = &opts.timestamp {
+                headers.insert(TIMESTAMP_HEADER, ts.as_str());
+            }
+            self.js
+                .publish_with_headers(subject.clone(), headers, payload)
+                .await
+                .with_context(|| format!("publishing to {} with headers", subject))?
+        };
+
+        ack.await.context("awaiting publish ack")?;
         Ok(())
     }
 
@@ -139,5 +182,44 @@ mod tests {
         assert_eq!(stream_name_for("occitan.ops.metrics.cpu"), "OCCITAN");
         assert_eq!(stream_name_for("infra.metrics"), "INFRA");
         assert_eq!(stream_name_for("plain"), "PLAIN");
+    }
+
+    #[test]
+    fn publish_options_default_has_no_qualifier_or_timestamp() {
+        // Existing callers (e.g. nervi-server's pre-qualifier nervi_publish
+        // handler) build PublishOptions without setting these two fields —
+        // Default must preserve the old no-header publish behavior exactly.
+        let opts = PublishOptions {
+            subject: "occitan.ops.sre.alerts".to_string(),
+            payload: "{}".to_string(),
+            ..Default::default()
+        };
+        assert!(opts.qualifier.is_none());
+        assert!(opts.timestamp.is_none());
+    }
+
+    #[test]
+    fn header_names_match_nervi_mcp_constants() {
+        // Must stay byte-identical to mcp/nervi-mcp/src/core.ts's
+        // QUALIFIER_HEADER / TIMESTAMP_HEADER, or messages published from
+        // the Rust and TypeScript sides become indistinguishable only by
+        // accident rather than by contract.
+        assert_eq!(QUALIFIER_HEADER, "Nervi-Qualifier");
+        assert_eq!(TIMESTAMP_HEADER, "Nervi-Timestamp");
+    }
+
+    #[test]
+    fn header_map_carries_qualifier_and_timestamp_when_set() {
+        let mut headers = HeaderMap::new();
+        headers.insert(QUALIFIER_HEADER, "cross-project");
+        headers.insert(TIMESTAMP_HEADER, "2026-07-01T00:00:00Z");
+        assert_eq!(
+            headers.get(QUALIFIER_HEADER).map(|v| v.to_string()),
+            Some("cross-project".to_string())
+        );
+        assert_eq!(
+            headers.get(TIMESTAMP_HEADER).map(|v| v.to_string()),
+            Some("2026-07-01T00:00:00Z".to_string())
+        );
     }
 }

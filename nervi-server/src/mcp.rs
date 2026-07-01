@@ -128,10 +128,20 @@ async fn call_tool(nervi: &Arc<NerviClient>, name: &str, args: &Value) -> anyhow
         "nervi_publish" => {
             let subject = args["subject"].as_str().unwrap_or("").to_string();
             let payload = args["payload"].as_str().unwrap_or("").to_string();
+            let qualifier = args["qualifier"].as_str().map(|s| s.to_string());
             anyhow::ensure!(!subject.is_empty(), "subject is required");
             anyhow::ensure!(!payload.is_empty(), "payload is required");
 
-            nervi.publish(PublishOptions { subject: subject.clone(), payload }).await?;
+            // Timestamp generation isn't wired here (this binary isn't deployed —
+            // see README; the deployed publisher is the TypeScript nervi-mcp,
+            // which does set Nervi-Timestamp). qualifier is accepted so this
+            // handler at least reaches header parity with nervi-mcp on that field.
+            nervi.publish(PublishOptions {
+                subject: subject.clone(),
+                payload,
+                qualifier,
+                timestamp: None,
+            }).await?;
             Ok(text_result(format!("published to {}", subject)))
         }
 

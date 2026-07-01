@@ -11,6 +11,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+bytes = "1"
 
 [dev-dependencies]
 # Integration tests (tests/) compile as a separate crate and only see
