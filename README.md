@@ -2,6 +2,8 @@
 
 **The async subscription fabric of the Occitan stack — the nervous system.**
 
+Grok support: full inter-mingling via per-agent model in Fondament (grok* models supported in component agents that use nervi MCP).
+
 Nèrvi is not a queue alongside [Amassada](https://github.com/miegjorn/Occitan) — it is
 Amassada *inside* the queue. Agents subscribe to topics; sensors publish signals; the
 full agent-to-agent signal flow is captured and routed asynchronously. Where
@@ -14,20 +16,22 @@ Farga node types.
 
 ## Epic 1 — Signal Bus Core (this repository)
 
-The first proof-of-value: **SRE logs → `ops.sre.alerts` subject → developer consumer.**
+The first proof-of-value: **SRE logs → `occitan.ops.sre.alerts` subject → developer consumer.**
 
 | Story | What |
 |-------|------|
 | N-1 (#3) | Deploy NATS JetStream via Helm on the Occitan k8s cluster |
 | N-2 (#4) | MCP tool `nervi_publish` — publish to a subject |
 | N-3 (#5) | MCP tool `nervi_subscribe` — fetch pending messages from a subject |
-| N-4 (#6) | Integration test: SRE sensor → `ops.sre.alerts` → consumer — TypeScript layer (`nervi-mcp`) and Rust layer (`nervi-core`) both green (see [docs/integration-test-n4.md](docs/integration-test-n4.md)) |
+| N-4 (#6) | Integration test: SRE sensor → `occitan.ops.sre.alerts` → consumer — TypeScript layer (`nervi-mcp`) and Rust layer (`nervi-core`) both green (see [docs/integration-test-n4.md](docs/integration-test-n4.md)) |
 
 ## Layout
 
 ```
 helm/nervi/           Helm chart: NATS JetStream (OCCITAN stream) + nervi-mcp + sre-watcher
-mcp/nervi-mcp/        TypeScript MCP server exposing nervi_publish / nervi_subscribe
+mcp/nervi-mcp/        TypeScript MCP server exposing nervi_publish / nervi_subscribe  ← deployed
+nervi-core/           Rust client library (NerviClient) — used by nervi-server and integration tests
+nervi-server/         Rust MCP server (wraps nervi-core) — built and CI-tested, NOT deployed
 sensors/sre-watcher/  TypeScript SRE log watcher (N-5) — streams pod logs to the N-6 stage
 docs/                 Architecture notes + the N-4 integration test plan
 ```
@@ -39,7 +43,7 @@ A single durable JetStream stream backs all operational topics:
 | Property | Value |
 |----------|-------|
 | Name | `OCCITAN` |
-| Subjects | `ops.>` (covers `ops.sre.alerts`, etc.) |
+| Subjects | `occitan.>` (covers `occitan.ops.sre.alerts`, etc.) |
 | Storage | file (persistent, 1 GiB max) |
 | Retention | limits, 7-day max age |
 | Replicas | 1 |
@@ -63,7 +67,7 @@ A post-install hook idempotently reconciles the `OCCITAN` stream against
 server. It connects to NATS via `NATS_URL`
 (default `nats://nervi-nats.nervi.svc.cluster.local:4222`) and exposes two tools:
 
-- **`nervi_publish`** — publish to an `ops.*` subject. Inputs: `subject`, `payload`
+- **`nervi_publish`** — publish to an `occitan.*` subject. Inputs: `subject`, `payload`
   (string or JSON), `qualifier` (`info` | `cross-project` | `data`). The qualifier is
   embedded as the `Nervi-Qualifier` message header.
 - **`nervi_subscribe`** — fetch pending messages via a durable pull consumer (stateless,
@@ -83,8 +87,8 @@ npm run build
 ### Integration test (N-4, TypeScript)
 
 `npm run test:integration` runs the end-to-end test that proves Epic 1: a producer
-publishes to `ops.sre.alerts` and an independent consumer receives the alert — payload
-byte-for-byte and `Nervi-Qualifier` intact, including when the consumer subscribes
+publishes to `occitan.ops.sre.alerts` and an independent consumer receives the alert —
+payload byte-for-byte and `Nervi-Qualifier` intact, including when the consumer subscribes
 *after* publication. It drives the real `NatsBus` (no bus mock) against a real NATS
 server, provisioning the `OCCITAN` stream itself.
 
@@ -116,7 +120,7 @@ cargo test -p nervi-core --lib
 
 The **N-4 integration test** (`nervi-core/tests/integration.rs`) is the
 end-to-end proof of the Signal Bus Core at the Rust layer: an SRE-style producer
-publishes on `ops.sre.alerts`, and a developer consumer fetches the alert back —
+publishes on `occitan.ops.sre.alerts`, and a developer consumer fetches the alert back —
 payload intact, *after* the producer has finished (durable, late subscription). It runs
 against a **real** NATS JetStream broker (no mocks):
 
@@ -128,6 +132,19 @@ cargo test --workspace # includes tests/integration.rs
 The broker URL is read from `NERVI_TEST_NATS_URL` (default
 `nats://127.0.0.1:4222`). CI starts `nats:2.10-alpine -js` and runs this test on
 every push and pull request (see `.github/workflows/ci.yml`).
+
+## The Rust MCP server (`nervi-server/`)
+
+`nervi-server/` is a Rust MCP server that wraps `nervi-core` over an `axum`-based HTTP
+listener (`POST /mcp`, JSON-RPC 2.0). It exposes the same `nervi_publish` /
+`nervi_subscribe` tool names as the TypeScript server, using `nervi-core`'s `NerviClient`
+underneath. It is compiled and linted by CI as part of the Cargo workspace but **has no
+Docker image and is not referenced in the Helm chart** — the deployed in-cluster server is
+the TypeScript `nervi-mcp`. `nervi-server` is available as a Rust-native alternative if a
+different deployment path is chosen later.
+
+Note: `nervi-core`'s `subscribe` uses ephemeral pull consumers (fresh consumer per call,
+no durable cursor), which differs from the TypeScript server's durable-consumer model.
 
 ## The SRE log watcher (N-5)
 
