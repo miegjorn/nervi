@@ -20,9 +20,9 @@ Occitan k8s cluster.
 
 ### The OCCITAN stream
 
-A single durable stream captures all operational topics under `ops.>`:
+A single durable stream captures all operational topics under `occitan.>`:
 
-- **Subjects** `ops.>` — e.g. `ops.sre.alerts`, future `ops.*.*`.
+- **Subjects** `occitan.>` — e.g. `occitan.ops.sre.alerts`, future `occitan.ops.*.*`.
 - **Storage** file, 1 GiB max, 7-day max age, `discard: old` — bounded, self-trimming.
 - **Replicas** 1 to start (single-writer; revisit when the cluster grows).
 - **Exposure** ClusterIP only. Nèrvi is intra-cluster infrastructure, never public.
@@ -48,7 +48,7 @@ extensibility (the triager rule schema) is deferred to a later epic.
 
 Two stateless tools, the minimum to prove the fabric:
 
-- **`nervi_publish`** validates the subject (concrete, under `ops.*`), normalizes the
+- **`nervi_publish`** validates the subject (concrete, under `occitan.*`), normalizes the
   payload (string passthrough or JSON encode), embeds the qualifier + an ISO-8601
   publish timestamp as headers, and JetStream-publishes. Returns the stream + sequence.
 - **`nervi_subscribe`** creates (idempotently) a durable pull consumer filtered to the
@@ -72,7 +72,42 @@ server.ts    MCP wiring (stdio locally / Streamable HTTP in-cluster)
 ```
 
 The `SignalBus` seam is what lets N-2/N-3 logic be unit-tested without a broker. Live
-broker behavior is covered by the N-4 integration test (planned).
+broker behavior is covered by the N-4 integration test (implemented and CI-green; see
+`mcp/nervi-mcp/test/bus.integration.test.ts` and `nervi-core/tests/integration.rs`).
+
+## Two MCP server implementations
+
+There are two MCP server implementations in the repo. **Only the TypeScript one is deployed.**
+
+### TypeScript (`mcp/nervi-mcp/`) — deployed in-cluster
+
+Built as a Node.js process, packaged as `ghcr.io/miegjorn/nervi-mcp`, and deployed by the
+Helm chart (`mcp.enabled: true`). Runs over Streamable HTTP (`NERVI_MCP_TRANSPORT=http`)
+in-cluster on port 8080; falls back to stdio locally. It is the live implementation that
+agents call through the Helm-provisioned ClusterIP Service.
+
+Layering: `core.ts` (pure domain) → `handlers.ts` (tool logic over `SignalBus`) →
+`bus.ts` (NATS adapter, `NatsBus`) → `server.ts` (MCP wiring).
+
+Subscribe uses **durable** pull consumers: `consumer_name` is a required argument that
+identifies the consumer across calls. A new consumer name starts from the stream head;
+the same name resumes from where it last acked.
+
+### Rust (`nervi-server/`) — built and CI-tested, not deployed
+
+A Rust implementation (`axum`-based HTTP server, JSON-RPC 2.0 over `POST /mcp`) that
+wraps `nervi-core`. It exposes `nervi_publish` and `nervi_subscribe` using the same tool
+names as the TypeScript server. Built and linted by `cargo clippy` in CI as part of the
+workspace (`cargo test --workspace`), but there is no Docker image job for it in CI and
+it is not referenced in the Helm chart.
+
+Subscribe in `nervi-core` uses **ephemeral** consumers (fresh consumer per call, no
+durable cursor). This is the primary behavioural difference from the deployed TypeScript
+implementation: ephemerals see only messages published after the call; durable consumers
+maintain a cursor.
+
+`nervi-server` is available for future use if a Rust-native deployment path is wanted,
+but the canonical in-cluster server is `nervi-mcp` (TypeScript).
 
 ## The SRE log watcher (N-5)
 

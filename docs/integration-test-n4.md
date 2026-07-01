@@ -1,4 +1,4 @@
-# N-4 — Integration test: SRE sensor → `ops.sre.alerts` → consumer
+# N-4 — Integration test: SRE sensor → `occitan.ops.sre.alerts` → consumer
 
 **Status:** implemented at two layers. Closes nervi#6.
 
@@ -21,14 +21,15 @@ matching nervi#6's definition of done):
   published and exited, and still receives the alert from the file-backed stream.
 - **Payload integrity:** the JSON alert round-trips byte-for-byte and decodes back
   into the same struct.
-- **Subject filtering:** noise published to a different `ops.*` subject
-  (`ops.metrics.cpu`) is not delivered to the `ops.sre.alerts` consumer.
+- **Subject filtering:** noise published to a different `occitan.*` subject
+  (`occitan.ops.metrics.cpu`) is not delivered to the `occitan.ops.sre.alerts` consumer.
 
 **Deferred to follow-up work** (see Farga TODO `nervi/n4-integration`):
 
-- Durable-cursor ack semantics (plan steps 6–7): the current `nervi_subscribe`
-  uses stateless `DeliverAll` ephemeral consumers, so re-fetch replays rather than
-  advancing a cursor.
+- Durable-cursor ack semantics (plan steps 6–7): the Rust `nervi_subscribe` (in
+  `nervi-core`) uses stateless ephemeral consumers, so re-fetch replays rather than
+  advancing a cursor. The deployed TypeScript `nervi_subscribe` uses durable consumers
+  with an explicit `consumer_name`, so it does advance the cursor correctly.
 - `Nervi-Qualifier` header round-trip (the Rust client carries no qualifier yet).
 - The true in-cluster E2E harness driving `nervi-mcp` over Streamable HTTP.
 
@@ -44,8 +45,8 @@ The rest of this document is the original plan the implementation followed.
 
 Demonstrate, against a live NATS JetStream + `nervi-mcp`:
 
-> A signal published to `ops.sre.alerts` by an SRE-style producer is durably stored on
-> the OCCITAN stream and later fetched, intact and correctly qualified, by an
+> A signal published to `occitan.ops.sre.alerts` by an SRE-style producer is durably
+> stored on the OCCITAN stream and later fetched, intact and correctly qualified, by an
 > independent durable consumer — even when the consumer reads *after* the producer has
 > finished.
 
@@ -70,10 +71,10 @@ Two viable harnesses; pick one when implementing:
 
 | Step | Actor | Action | Expectation |
 |------|-------|--------|-------------|
-| 1 | Producer | `nervi_publish` `{subject: "ops.sre.alerts", qualifier: "info", payload: {level:"critical", node:"node-3", msg:"disk 95% full"}}` | Returns `{published:true, stream:"OCCITAN", seq:N}` |
+| 1 | Producer | `nervi_publish` `{subject: "occitan.ops.sre.alerts", qualifier: "info", payload: {level:"critical", node:"node-3", msg:"disk 95% full"}}` | Returns `{published:true, stream:"OCCITAN", seq:N}` |
 | 2 | Producer | Publish a second, distinct alert (`qualifier: "cross-project"`) | `seq` increments |
 | 3 | — | (consumer is created only now — proves async/durable delivery) | — |
-| 4 | Consumer | `nervi_subscribe` `{subject:"ops.sre.alerts", consumer_name:"developer-consumer", max_messages:10}` | Returns both messages |
+| 4 | Consumer | `nervi_subscribe` `{subject:"occitan.ops.sre.alerts", consumer_name:"developer-consumer", max_messages:10}` | Returns both messages |
 | 5 | Consumer | Inspect returned messages | `qualifier` matches what was published; `payload` round-trips byte-for-byte; `sequence` ascending; `timestamp` present and ISO-8601 |
 | 6 | Consumer | Call `nervi_subscribe` again, same `consumer_name` | Returns 0 messages (previous fetch acked them — durable cursor advanced) |
 | 7 | Consumer | Call with a *new* `consumer_name` | Returns both messages again (independent cursor) |
@@ -86,12 +87,12 @@ Two viable harnesses; pick one when implementing:
 - **Payload integrity:** JSON payloads round-trip without mangling (step 5).
 - **Consumer durability / ack semantics:** acked messages are not redelivered to the same
   durable consumer; a fresh consumer name replays from the stream (steps 6–7).
-- **Subject filtering:** a message published to a *different* `ops.*` subject is not
-  delivered to the `ops.sre.alerts` consumer.
+- **Subject filtering:** a message published to a *different* `occitan.*` subject is not
+  delivered to the `occitan.ops.sre.alerts` consumer.
 
 ## Negative / edge cases
 
-- Publish to a non-`ops.*` subject → tool returns an input-validation error, nothing
+- Publish to a non-`occitan.*` subject → tool returns an input-validation error, nothing
   stored.
 - `nervi_subscribe` with `max_messages` larger than the pending count returns only what
   is pending (no hang beyond the fetch expiry).
