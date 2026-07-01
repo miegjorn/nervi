@@ -4,12 +4,12 @@ import { handlePublish, handleSubscribe } from '../src/handlers.js';
 
 /** Records every publish and replays canned fetch results. */
 class FakeBus implements SignalBus {
-  published: Array<{ subject: string; payload: string; qualifier: Qualifier }> = [];
+  published: Array<{ subject: string; payload: string; qualifier: Qualifier; msgId?: string }> = [];
   fetched: Array<{ subject: string; consumerName: string; maxMessages: number }> = [];
   fetchResult: ReceivedMessage[] = [];
 
-  async publish(subject: string, payload: string, qualifier: Qualifier) {
-    this.published.push({ subject, payload, qualifier });
+  async publish(subject: string, payload: string, qualifier: Qualifier, msgId?: string) {
+    this.published.push({ subject, payload, qualifier, msgId });
     return { stream: 'OCCITAN', seq: this.published.length };
   }
 
@@ -33,10 +33,11 @@ describe('handlePublish', () => {
     });
 
     expect(bus.published).toEqual([
-      { subject: 'occitan.ops.sre.alerts', payload: 'disk full on node-3', qualifier: 'info' },
+      { subject: 'occitan.ops.sre.alerts', payload: 'disk full on node-3', qualifier: 'info', msgId: undefined },
     ]);
     const body = parse(result);
     expect(body).toMatchObject({ published: true, subject: 'occitan.ops.sre.alerts', qualifier: 'info', stream: 'OCCITAN', seq: 1 });
+    expect(body.msg_id).toBeUndefined();
   });
 
   it('JSON-encodes object payloads before handing them to the bus', async () => {
@@ -47,6 +48,46 @@ describe('handlePublish', () => {
       qualifier: 'data',
     });
     expect(bus.published[0].payload).toBe('{"level":"critical","node":"node-3"}');
+  });
+
+  it('passes msg_id to the bus and includes it in the result', async () => {
+    const bus = new FakeBus();
+    const msgId = 'dispatch-caissa-43-20260630';
+    const result = await handlePublish(bus, {
+      subject: 'occitan.dispatch.caissa',
+      payload: { task: 'fix health endpoint' },
+      qualifier: 'info',
+      msg_id: msgId,
+    });
+
+    expect(bus.published[0].msgId).toBe(msgId);
+    const body = parse(result);
+    expect(body.msg_id).toBe(msgId);
+    expect(body.published).toBe(true);
+  });
+
+  it('omits msg_id from result when not provided', async () => {
+    const bus = new FakeBus();
+    const result = await handlePublish(bus, {
+      subject: 'occitan.ops.sre.alerts',
+      payload: 'ping',
+      qualifier: 'info',
+    });
+    const body = parse(result);
+    expect('msg_id' in body).toBe(false);
+  });
+
+  it('rejects msg_id with whitespace', async () => {
+    const bus = new FakeBus();
+    await expect(
+      handlePublish(bus, {
+        subject: 'occitan.ops.sre.alerts',
+        payload: 'ping',
+        qualifier: 'info',
+        msg_id: 'dispatch caissa 43',
+      }),
+    ).rejects.toThrow(ValidationError);
+    expect(bus.published).toHaveLength(0);
   });
 
   it('rejects bad input before touching the bus', async () => {

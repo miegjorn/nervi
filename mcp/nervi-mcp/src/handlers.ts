@@ -8,6 +8,7 @@
 import {
   assertConsumerName,
   assertMaxMessages,
+  assertMsgId,
   assertQualifier,
   assertSubject,
   normalizePayload,
@@ -34,6 +35,15 @@ export interface PublishArgs {
   subject?: unknown;
   payload?: unknown;
   qualifier?: unknown;
+  /**
+   * Optional NATS deduplication key. When provided, set as the `Nats-Msg-Id`
+   * header on the published message. The broker silently drops any subsequent
+   * publish with the same value within the stream's duplicate_window (1 hour).
+   *
+   * Convention (ADR-N-002): dispatch messages use
+   *   `dispatch-<component>-<issue-number>-<date>` e.g. `dispatch-caissa-43-20260630`.
+   */
+  msg_id?: unknown;
 }
 
 /** N-2: publish a message to an OCCITAN subject with an embedded qualifier. */
@@ -41,12 +51,14 @@ export async function handlePublish(bus: SignalBus, args: PublishArgs): Promise<
   const subject = assertSubject(args.subject);
   const qualifier = assertQualifier(args.qualifier);
   const payload = normalizePayload(args.payload);
+  const msgId = assertMsgId(args.msg_id);
 
-  const result = await bus.publish(subject, payload, qualifier);
+  const result = await bus.publish(subject, payload, qualifier, msgId);
   return jsonResult({
     published: true,
     subject,
     qualifier,
+    ...(msgId !== undefined ? { msg_id: msgId } : {}),
     stream: result.stream,
     seq: result.seq,
   });

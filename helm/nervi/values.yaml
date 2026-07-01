@@ -17,10 +17,22 @@ stream:
   storage: file
   retention: limits
   discard: old
+  # When discard_new_per_subject is true, a publish to a subject that already
+  # holds maxMsgsPerSubject messages is rejected rather than evicting the oldest
+  # message. This prevents any single dispatch subject from flooding the stream
+  # at the cost of back-pressure on the publisher. Requires maxMsgsPerSubject > 0.
+  discardNewPerSubject: true
   replicas: 1
   maxBytes: 1073741824 # 1 GiB
+  maxMsgsPerSubject: 1000 # per-subject ceiling; guards against runaway dispatch loops
   maxAgeSeconds: 604800 # 7 days
-  duplicateWindowSeconds: 120 # 2 minutes
+  # duplicate_window is the JetStream broker-side deduplication window for
+  # Nats-Msg-Id headers. Publishers that include the same Nats-Msg-Id within
+  # this window will have their second publish silently dropped. Set to 1 hour
+  # (3600 s) to cover the typical agent session duration; a dispatch published
+  # twice within one hour with the same id (dispatch-<component>-<n>-<date>) is
+  # idempotent — only the first lands in the stream. See ADR-N-002.
+  duplicateWindowSeconds: 3600 # 1 hour (was 120 s)
   # nats-box image used to run the natscli provisioning job.
   provisionImage: natsio/nats-box:0.18.0
 

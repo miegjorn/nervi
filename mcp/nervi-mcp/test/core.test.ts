@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MSG_ID_HEADER,
   QUALIFIER_HEADER,
   QUALIFIERS,
   STREAM_NAME,
@@ -8,6 +9,7 @@ import {
   ValidationError,
   assertConsumerName,
   assertMaxMessages,
+  assertMsgId,
   assertQualifier,
   assertSubject,
   buildHeaders,
@@ -55,7 +57,7 @@ describe('ADR-N-001 namespace contract', () => {
   // deriving it from core.ts. bus.integration.test.ts imports STREAM_SUBJECTS,
   // so if STREAM_SUBJECTS and assertSubject drift together to a wrong namespace
   // (as happened between PR #15 and PR #16), the integration test stays green
-  // while production breaks. This block is the independent witness that pins
+  // while production breaks silently. This block is the independent witness that pins
   // the contract to literals; it goes red the moment core.ts strays.
   it('STREAM_SUBJECTS matches occitan namespace', () => {
     expect(STREAM_SUBJECTS).toEqual(['occitan.>']);
@@ -116,12 +118,58 @@ describe('assertConsumerName', () => {
   });
 });
 
+describe('assertMsgId', () => {
+  it('returns undefined when value is undefined', () => {
+    expect(assertMsgId(undefined)).toBeUndefined();
+  });
+
+  it('passes valid non-empty strings', () => {
+    expect(assertMsgId('dispatch-caissa-43-20260630')).toBe('dispatch-caissa-43-20260630');
+    expect(assertMsgId('dispatch-fondament-7-20260630')).toBe('dispatch-fondament-7-20260630');
+  });
+
+  it('rejects empty strings', () => {
+    expect(() => assertMsgId('')).toThrow(ValidationError);
+  });
+
+  it('rejects strings with whitespace', () => {
+    expect(() => assertMsgId('dispatch caissa')).toThrow(ValidationError);
+    expect(() => assertMsgId('dispatch\tcaissa')).toThrow(ValidationError);
+  });
+
+  it('rejects non-string values when provided', () => {
+    expect(() => assertMsgId(42)).toThrow(ValidationError);
+    expect(() => assertMsgId(null)).toThrow(ValidationError);
+  });
+});
+
 describe('buildHeaders', () => {
   it('embeds the qualifier and timestamp headers', () => {
     const ts = '2026-06-29T12:00:00.000Z';
     const headers = buildHeaders('cross-project', ts);
     expect(headers[QUALIFIER_HEADER]).toBe('cross-project');
     expect(headers[TIMESTAMP_HEADER]).toBe(ts);
+  });
+
+  it('omits Nats-Msg-Id when msgId is not provided', () => {
+    const ts = '2026-06-29T12:00:00.000Z';
+    const headers = buildHeaders('info', ts);
+    expect(MSG_ID_HEADER in headers).toBe(false);
+  });
+
+  it('includes Nats-Msg-Id when msgId is provided', () => {
+    const ts = '2026-06-29T12:00:00.000Z';
+    const msgId = 'dispatch-caissa-43-20260630';
+    const headers = buildHeaders('info', ts, msgId);
+    expect(headers[MSG_ID_HEADER]).toBe(msgId);
+    expect(headers[QUALIFIER_HEADER]).toBe('info');
+    expect(headers[TIMESTAMP_HEADER]).toBe(ts);
+  });
+});
+
+describe('MSG_ID_HEADER constant', () => {
+  it('is the standard NATS deduplication header name', () => {
+    expect(MSG_ID_HEADER).toBe('Nats-Msg-Id');
   });
 });
 
