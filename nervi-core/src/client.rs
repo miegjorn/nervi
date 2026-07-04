@@ -38,6 +38,7 @@ pub struct PublishOptions {
 }
 
 /// Thin wrapper around the async-nats JetStream client.
+#[derive(Clone)]
 pub struct NerviClient {
     js: jetstream::Context,
 }
