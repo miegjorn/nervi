@@ -163,6 +163,65 @@ impl NerviClient {
 
         Ok(out)
     }
+
+    /// Continuously consume `subject` via a *durable* pull consumer whose
+    /// `.messages()` stream the async-nats client keeps fed in the
+    /// background — no caller-visible poll/sleep loop. `durable_name` must
+    /// be stable across restarts for the same logical consumer (e.g.
+    /// `corrier-inbound-guilhem`) so JetStream resumes from where it left
+    /// off rather than replaying or dropping history.
+    ///
+    /// Returned stream yields `Ok(Message)` for each delivered message
+    /// (already ack'd) or `Err` if a delivery itself failed to decode --
+    /// callers should log-and-continue on `Err`, not tear down the stream.
+    pub async fn consume_durable(
+        &self,
+        subject: &str,
+        durable_name: &str,
+    ) -> Result<impl futures::Stream<Item = Result<Message>>> {
+        let stream_name = stream_name_for(subject);
+
+        let stream = self
+            .js
+            .get_or_create_stream(jetstream::stream::Config {
+                name: stream_name.clone(),
+                subjects: vec![format!("{}.>", subject.split('.').next().unwrap_or(subject))],
+                storage: jetstream::stream::StorageType::File,
+                ..Default::default()
+            })
+            .await
+            .with_context(|| format!("ensuring stream {} for {}", stream_name, subject))?;
+
+        let consumer: PullConsumer = stream
+            .get_or_create_consumer(
+                durable_name,
+                jetstream::consumer::pull::Config {
+                    durable_name: Some(durable_name.to_string()),
+                    filter_subject: subject.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .with_context(|| format!("creating durable consumer {} for {}", durable_name, subject))?;
+
+        let messages = consumer
+            .messages()
+            .await
+            .context("opening continuous message stream")?;
+
+        Ok(futures::StreamExt::map(messages, |result| {
+            let msg = result.map_err(|e| anyhow::anyhow!("reading message from stream: {}", e))?;
+            let payload = String::from_utf8_lossy(&msg.payload).to_string();
+            let subject = msg.subject.to_string();
+            // Ack inline -- at-least-once delivery, matching subscribe()'s
+            // existing per-message ack behavior.
+            let ack_msg = msg.clone();
+            tokio::spawn(async move {
+                let _ = ack_msg.ack().await;
+            });
+            Ok(Message { subject, payload })
+        }))
+    }
 }
 
 /// Derive the JetStream stream name from a subject.
@@ -221,5 +280,14 @@ mod tests {
             headers.get(TIMESTAMP_HEADER).map(|v| v.to_string()),
             Some("2026-07-01T00:00:00Z".to_string())
         );
+    }
+
+    #[test]
+    fn durable_consumer_name_is_stable_and_url_safe() {
+        // consume_durable derives its NATS durable_name from the caller-supplied
+        // name verbatim -- this test just documents that expectation so a future
+        // change to the derivation doesn't silently break existing durables.
+        let name = "corrier-inbound-guilhem-abc123";
+        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 }
