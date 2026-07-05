@@ -11,7 +11,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { NatsBus } from './bus.js';
-import { QUALIFIERS, ValidationError, type SignalBus } from './core.js';
+import { QUALIFIERS, SubjectBindingError, ValidationError, type SignalBus } from './core.js';
 import { handlePublish, handleSubscribe, type ToolResult } from './handlers.js';
 
 async function toResult(fn: () => Promise<ToolResult>): Promise<CallToolResult> {
@@ -20,6 +20,11 @@ async function toResult(fn: () => Promise<ToolResult>): Promise<CallToolResult> 
   } catch (err) {
     if (err instanceof ValidationError) {
       return { content: [{ type: 'text', text: `Invalid input: ${err.message}` }], isError: true };
+    }
+    // The binding message is self-contained and actionable — surface it verbatim
+    // rather than burying it under a generic "Bus error:" prefix.
+    if (err instanceof SubjectBindingError) {
+      return { content: [{ type: 'text', text: err.message }], isError: true };
     }
     const message = err instanceof Error ? err.message : String(err);
     return { content: [{ type: 'text', text: `Bus error: ${message}` }], isError: true };
@@ -64,10 +69,22 @@ export function buildServer(bus: SignalBus): McpServer {
       title: 'Fetch pending messages from a Nèrvi subject',
       description:
         'Fetch pending messages from a NATS JetStream subject via a durable pull consumer. ' +
-        'Stateless — no long-running subscription. Creates the durable consumer on first use.',
+        'Stateless — no long-running subscription. Creates the durable consumer on first use. ' +
+        'A durable consumer is permanently bound to the subject it was first created with: ' +
+        'reusing the same consumer_name for a different subject is rejected (it would silently ' +
+        'deliver messages from the original subject). Use a unique consumer_name per subject — ' +
+        'suggested convention <agent>-<subject-suffix>, e.g. guilhem-review-request-guilhem for ' +
+        'occitan.review-request.guilhem.',
       inputSchema: {
         subject: z.string().describe('Concrete subject under occitan.* (e.g. occitan.issues.nervi)'),
-        consumer_name: z.string().describe('Durable consumer identity (stable across calls)'),
+        consumer_name: z
+          .string()
+          .describe(
+            'Durable consumer identity (stable across calls). Must be unique per subject — a ' +
+            'durable consumer keeps its original filter subject for life, so a name reused across ' +
+            'subjects is rejected. Suggested format <agent>-<subject-suffix>, ' +
+            'e.g. guilhem-review-request-guilhem.',
+          ),
         max_messages: z
           .number()
           .int()

@@ -39,6 +39,49 @@ export class ValidationError extends Error {
   }
 }
 
+/**
+ * Raised when a durable consumer already exists but is bound to a different
+ * filter subject than the caller asked for.
+ *
+ * NATS JetStream durable consumers retain their original filter subject for the
+ * lifetime of the consumer name: attaching to an existing consumer ignores the
+ * `filter_subject` you pass and silently delivers messages from whatever subject
+ * the consumer was first created with. That is a silent failure — the caller
+ * receives messages from the wrong subject with no error. This exception turns
+ * that silence into an explicit, actionable error.
+ */
+export class SubjectBindingError extends Error {
+  constructor(
+    readonly consumerName: string,
+    readonly boundSubject: string,
+    readonly requestedSubject: string,
+  ) {
+    super(subjectBindingErrorMessage(consumerName, boundSubject, requestedSubject));
+    this.name = 'SubjectBindingError';
+  }
+}
+
+/**
+ * Build the human-facing message for a consumer/subject binding mismatch. Pure
+ * and NATS-independent so the exact wording can be unit-tested. The suggested
+ * convention makes each consumer name unique per subject: `<agent>-<subject-suffix>`,
+ * derived by dropping the `occitan.` prefix and replacing dots with dashes.
+ */
+export function subjectBindingErrorMessage(
+  consumerName: string,
+  boundSubject: string,
+  requestedSubject: string,
+): string {
+  const suffix = requestedSubject.replace(/^occitan\./, '').replace(/\./g, '-');
+  const agent = consumerName.split('-')[0] || consumerName;
+  const suggestion = `${agent}-${suffix}`;
+  return (
+    `Consumer '${consumerName}' is bound to subject '${boundSubject}', not '${requestedSubject}'. ` +
+    `Use a different consumer_name for each subject ` +
+    `(suggested convention: '<agent>-<subject-suffix>', e.g. '${suggestion}').`
+  );
+}
+
 export function isQualifier(value: unknown): value is Qualifier {
   return typeof value === 'string' && (QUALIFIERS as readonly string[]).includes(value);
 }

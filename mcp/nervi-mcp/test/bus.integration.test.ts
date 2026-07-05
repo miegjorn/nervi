@@ -20,7 +20,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connect, type JetStreamManager, type NatsConnection, AckPolicy, RetentionPolicy } from 'nats';
 import { NatsBus } from '../src/bus.js';
-import { STREAM_NAME, STREAM_SUBJECTS, ValidationError } from '../src/core.js';
+import { STREAM_NAME, STREAM_SUBJECTS, SubjectBindingError, ValidationError } from '../src/core.js';
 
 // ---------------------------------------------------------------------------
 // Stream provisioning helpers
@@ -247,6 +247,58 @@ describe('N-4 integration: SRE sensor → occitan.ops.sre.alerts → consumer', 
     await expect(
       handlePublish(bus, { subject: 'ops.sre.alerts', payload: ALERT_1, qualifier: 'info' }),
     ).rejects.toThrow(ValidationError);
+  });
+
+  // -------------------------------------------------------------------------
+  // Durable consumer / subject binding: reusing a consumer name for a second
+  // subject must be rejected, not silently served from the original subject.
+  // -------------------------------------------------------------------------
+
+  it('rejects reusing a durable consumer name for a different subject', async () => {
+    const CONSUMER_BOUND = 'binding-test-consumer';
+    await deleteConsumer(jsm, CONSUMER_BOUND);
+    await jsm.streams.purge(STREAM_NAME);
+
+    try {
+      // First use binds the consumer to occitan.ops.sre.alerts.
+      await bus.publish('occitan.ops.sre.alerts', ALERT_1, 'info');
+      const first = await bus.fetch('occitan.ops.sre.alerts', CONSUMER_BOUND, 10);
+      expect(first).toHaveLength(1);
+
+      // Publish to a different subject and try to fetch it under the SAME
+      // consumer name. Without the guard, NATS would silently deliver from the
+      // original filter subject (or nothing); the guard turns it into an error.
+      await bus.publish('occitan.review-request.guilhem', ALERT_2, 'info');
+      await expect(
+        bus.fetch('occitan.review-request.guilhem', CONSUMER_BOUND, 10),
+      ).rejects.toBeInstanceOf(SubjectBindingError);
+
+      // The error names both the bound and requested subjects.
+      await bus.fetch('occitan.review-request.guilhem', CONSUMER_BOUND, 10).catch((err) => {
+        expect(err.message).toContain('occitan.ops.sre.alerts');
+        expect(err.message).toContain('occitan.review-request.guilhem');
+      });
+    } finally {
+      await deleteConsumer(jsm, CONSUMER_BOUND);
+    }
+  });
+
+  it('allows the same subject under its own consumer name (no false positive)', async () => {
+    const CONSUMER_OK = 'binding-test-ok';
+    await deleteConsumer(jsm, CONSUMER_OK);
+    await jsm.streams.purge(STREAM_NAME);
+
+    try {
+      await bus.publish('occitan.review-request.guilhem', ALERT_1, 'info');
+      // Two fetches on the matching subject both succeed — the guard does not
+      // fire when the binding is consistent.
+      const a = await bus.fetch('occitan.review-request.guilhem', CONSUMER_OK, 10);
+      expect(a).toHaveLength(1);
+      const b = await bus.fetch('occitan.review-request.guilhem', CONSUMER_OK, 10);
+      expect(b).toHaveLength(0);
+    } finally {
+      await deleteConsumer(jsm, CONSUMER_OK);
+    }
   });
 
   // -------------------------------------------------------------------------
