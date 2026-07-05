@@ -11,6 +11,7 @@ import {
   connect,
   headers as natsHeaders,
   StringCodec,
+  type ConsumerInfo,
   type JetStreamClient,
   type JetStreamManager,
   type NatsConnection,
@@ -19,6 +20,7 @@ import {
   buildHeaders,
   QUALIFIER_HEADER,
   STREAM_NAME,
+  SubjectBindingError,
   TIMESTAMP_HEADER,
   type PublishResult,
   type Qualifier,
@@ -32,6 +34,19 @@ export const DEFAULT_NATS_URL = 'nats://nervi-nats.nervi.svc.cluster.local:4222'
 
 /** How long a pull fetch waits for messages before returning what it has. */
 const FETCH_EXPIRES_MS = 5_000;
+
+/**
+ * Extract the single filter subject a consumer is bound to. Consumers created
+ * by this bus always use the singular `filter_subject`, but a consumer created
+ * elsewhere may use the plural `filter_subjects` array — read whichever is set.
+ * Returns '' for an unfiltered consumer (binds the whole stream).
+ */
+function consumerFilterSubject(info: ConsumerInfo): string {
+  const { filter_subject, filter_subjects } = info.config;
+  if (filter_subject) return filter_subject;
+  if (filter_subjects && filter_subjects.length === 1) return filter_subjects[0];
+  return filter_subject ?? '';
+}
 
 export class NatsBus implements SignalBus {
   private constructor(
@@ -64,6 +79,16 @@ export class NatsBus implements SignalBus {
   async fetch(subject: string, consumerName: string, maxMessages: number): Promise<ReceivedMessage[]> {
     await this.ensureConsumer(subject, consumerName);
     const consumer = await this.js.consumers.get(STREAM_NAME, consumerName);
+
+    // Guard against silent subject mismatch: a durable consumer keeps its
+    // original filter subject for the lifetime of the consumer name, so
+    // attaching to a pre-existing consumer bound to another subject would
+    // deliver the wrong messages with no error. Fetch the live config and
+    // refuse to hand back messages if the binding does not match the request.
+    const boundSubject = consumerFilterSubject(await consumer.info());
+    if (boundSubject !== subject) {
+      throw new SubjectBindingError(consumerName, boundSubject, subject);
+    }
 
     const out: ReceivedMessage[] = [];
     const messages = await consumer.fetch({ max_messages: maxMessages, expires: FETCH_EXPIRES_MS });

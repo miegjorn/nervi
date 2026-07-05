@@ -6,6 +6,7 @@ import {
   STREAM_NAME,
   STREAM_SUBJECTS,
   TIMESTAMP_HEADER,
+  SubjectBindingError,
   ValidationError,
   assertConsumerName,
   assertMaxMessages,
@@ -15,6 +16,7 @@ import {
   buildHeaders,
   isQualifier,
   normalizePayload,
+  subjectBindingErrorMessage,
 } from '../src/core.js';
 
 describe('qualifier vocabulary', () => {
@@ -170,6 +172,32 @@ describe('buildHeaders', () => {
 describe('MSG_ID_HEADER constant', () => {
   it('is the standard NATS deduplication header name', () => {
     expect(MSG_ID_HEADER).toBe('Nats-Msg-Id');
+  });
+});
+
+describe('subjectBindingErrorMessage', () => {
+  it('names both subjects and suggests a unique consumer_name', () => {
+    const msg = subjectBindingErrorMessage(
+      'guilhem',
+      'occitan.sre.alerts',
+      'occitan.review-request.guilhem',
+    );
+    expect(msg).toContain("Consumer 'guilhem' is bound to subject 'occitan.sre.alerts'");
+    expect(msg).toContain("not 'occitan.review-request.guilhem'");
+    // Suggested convention drops the occitan. prefix and dashes the dots.
+    expect(msg).toContain("'guilhem-review-request-guilhem'");
+  });
+
+  it('SubjectBindingError carries the fields and the same message', () => {
+    const err = new SubjectBindingError('guilhem', 'occitan.sre.alerts', 'occitan.review-request.guilhem');
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('SubjectBindingError');
+    expect(err.consumerName).toBe('guilhem');
+    expect(err.boundSubject).toBe('occitan.sre.alerts');
+    expect(err.requestedSubject).toBe('occitan.review-request.guilhem');
+    expect(err.message).toBe(
+      subjectBindingErrorMessage('guilhem', 'occitan.sre.alerts', 'occitan.review-request.guilhem'),
+    );
   });
 });
 
