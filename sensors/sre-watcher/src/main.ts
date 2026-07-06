@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
- * Nèrvi SRE watcher (N-5) — entrypoint.
+ * Nèrvi SRE watcher — entrypoint.
  *
- * Wires the validated config to a live Kubernetes PodSource and the stand-in
- * ConsoleSink, then runs the watcher until SIGTERM/SIGINT. The watcher logic
- * lives in watcher.ts; this file only assembles the real dependencies and
- * handles process lifecycle.
+ * Wires the validated config to a live Kubernetes PodSource and the N-6
+ * ClassifyingSink (classification rules + alert publish to
+ * occitan.ops.sre.alerts over NATS/JetStream), then runs the watcher until
+ * SIGTERM/SIGINT. The watcher logic lives in watcher.ts; this file only
+ * assembles the real dependencies and handles process lifecycle.
  */
 import { parseConfig } from './core.js';
 import { K8sPodSource, loadKubeConfig } from './k8s.js';
-import { ConsoleSink } from './sinks.js';
+import { NatsAlertPublisher } from './publisher.js';
+import { ClassifyingSink } from './sinks.js';
 import { LogWatcher, type Logger } from './watcher.js';
 
 /** Structured logger to stderr — stdout is reserved for the NDJSON data plane. */
@@ -28,7 +30,8 @@ async function main(): Promise<void> {
   const config = parseConfig();
   const kc = loadKubeConfig();
   const source = new K8sPodSource(kc, config);
-  const sink = new ConsoleSink();
+  const publisher = await NatsAlertPublisher.connect();
+  const sink = new ClassifyingSink(publisher, stderrLogger);
   const watcher = new LogWatcher({ source, sink, config, logger: stderrLogger });
 
   const controller = new AbortController();
@@ -39,7 +42,11 @@ async function main(): Promise<void> {
     });
   }
 
-  await watcher.run(controller.signal);
+  try {
+    await watcher.run(controller.signal);
+  } finally {
+    await publisher.close();
+  }
 }
 
 main().catch((err) => {
