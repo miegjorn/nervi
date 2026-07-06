@@ -173,3 +173,98 @@ export function parseConfig(env: NodeJS.ProcessEnv = process.env): WatchConfig {
     maxReconnectBackoffMs,
   };
 }
+
+/** Severity levels emitted on occitan.ops.sre.alerts. */
+export type AlertSeverity = 'critical' | 'error' | 'warning';
+
+/** The classification categories the sink can assign to a log line. */
+export type AlertClassification =
+  | 'error_level'
+  | 'oom'
+  | 'crash_loop'
+  | 'restart_loop'
+  | 'traceback';
+
+/**
+ * The structured alert published to occitan.ops.sre.alerts (N-6 payload
+ * schema). One alert corresponds to exactly one matched log line.
+ */
+export interface Alert {
+  pod: string;
+  namespace: string;
+  severity: AlertSeverity;
+  classification: AlertClassification;
+  /** The matching log line, truncated to EXCERPT_MAX_CHARS. */
+  excerpt: string;
+  /** ISO8601 — the log line's timestamp (k8s stamp, else observation time). */
+  timestamp: string;
+}
+
+/** Subject the SRE alerts are published to (inside the OCCITAN `occitan.>` stream). */
+export const ALERT_SUBJECT = 'occitan.ops.sre.alerts';
+
+/** Alert excerpts are truncated to this many characters. */
+export const EXCERPT_MAX_CHARS = 500;
+
+/**
+ * The alert transport seam. ClassifyingSink publishes each alert through this;
+ * production wires a NATS/JetStream publisher (publisher.ts), tests substitute
+ * a recorder so the classification rules are verifiable without a live bus —
+ * the same seam discipline the watcher uses for the Kubernetes API.
+ */
+export interface AlertPublisher {
+  publish(subject: string, payload: string): Promise<void>;
+}
+
+/**
+ * Match one log message against the N-6 rules. Rules are evaluated in
+ * descending severity / specificity, so a line that trips several patterns is
+ * reported once, under its most serious classification (e.g. a line that says
+ * both ERROR and OOMKilled classifies as oom, not error_level). Returns null
+ * when no rule matches.
+ */
+function matchRule(
+  message: string,
+): { classification: AlertClassification; severity: AlertSeverity } | null {
+  if (/OOMKilled|Out of memory|memory limit exceeded/i.test(message)) {
+    return { classification: 'oom', severity: 'critical' };
+  }
+  if (/CrashLoopBackOff|back-off restarting failed container/i.test(message)) {
+    return { classification: 'crash_loop', severity: 'critical' };
+  }
+  if (/Traceback \(most recent call last\)|panic:|SIGSEGV|segfault/i.test(message)) {
+    return { classification: 'traceback', severity: 'critical' };
+  }
+  // error level: FATAL / CRITICAL are critical; a bare ERROR is error.
+  if (/FATAL|CRITICAL/i.test(message)) {
+    return { classification: 'error_level', severity: 'critical' };
+  }
+  if (/ERROR/i.test(message)) {
+    return { classification: 'error_level', severity: 'error' };
+  }
+  if (/restarting container|container restarted/i.test(message)) {
+    return { classification: 'restart_loop', severity: 'warning' };
+  }
+  return null;
+}
+
+/**
+ * Apply the N-6 classification rules to a single enriched log line. Returns the
+ * structured alert to publish, or null when the line matches no rule.
+ */
+export function classify(line: LogLine): Alert | null {
+  const match = matchRule(line.message);
+  if (!match) return null;
+  const excerpt =
+    line.message.length > EXCERPT_MAX_CHARS
+      ? line.message.slice(0, EXCERPT_MAX_CHARS)
+      : line.message;
+  return {
+    pod: line.pod,
+    namespace: line.namespace,
+    severity: match.severity,
+    classification: match.classification,
+    excerpt,
+    timestamp: line.timestamp,
+  };
+}
